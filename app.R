@@ -9,19 +9,28 @@ library(stringr)
 library(purrr)
 
 # load in data
-parks <- st_read("data/park_boundaries_2025-08-14.gpkg")
+parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg")
 
 # read in water supply database
-water_supplies <- read_csv("data/water_supplies.csv")%>% 
+water_supplies <- read_csv("app_data/water_supplies.csv")%>% 
   mutate(id = wsd_system_id)
 
 # read in indicators
-fire_exp <- read_csv("data/fire_exp_2025-08-26.csv")
-fire_sen <- read_csv("data/fire_sen_2025-08-26.csv")
+fire_exp <- read_csv("app_data/fire_exp_2025-08-26.csv")
+fire_sen <- read_csv("app_data/fire_sen_2025-08-26.csv")
+runoff <- read_csv("app_data/runoff_vulnerability_indicator.csv") %>%
+  mutate(id = str_remove(wsd_source_id, "_0\\d+$")) %>% 
+  select(id, "Change in Runoff 10th Percentile" = p10_percent_change,
+         "Runoff Decrease Model Percentage" = percent_models_negative) %>% 
+  mutate(mutate(across(
+    where(is.numeric),
+    .fns = list(pcntl = ~ cume_dist(.) * 100),
+    .names = "{col}_{fn}"
+  )))
 
-data <- reduce(list(water_supplies, fire_exp, fire_sen), left_join, by = "id") %>% 
+data <- reduce(list(water_supplies, fire_exp, fire_sen, runoff), left_join, by = "id") %>% 
   select(source_longitude, source_latitude, park_name, region, state, park_unit, water_system_name, wsd_system_id, names(fire_exp)[-c(1:2)],
-         names(fire_sen)[-c(1:2)])  %>% 
+         names(fire_sen)[-c(1:2)], names(runoff)[-1])  %>% 
   # change beginning string
   rename_with(~str_replace(.x, "delta_fp", "Change in fire probability "), 
               .cols = contains("delta_fp")) %>% 
@@ -38,7 +47,7 @@ data <- reduce(list(water_supplies, fire_exp, fire_sen), left_join, by = "id") %
               .cols = contains("_ws_buffer")) %>% 
   st_as_sf(coords = c("source_longitude", "source_latitude"), crs = 4326)
 
-vars <- names(data)[str_detect(names(data), "Percentile|Median|Mean")]
+vars <- names(data)[str_detect(names(data), "Percentile|Median|Mean|Percentage")]
 
 # UI with enhanced styling
 ui <- fluidPage(
@@ -226,8 +235,15 @@ server <- function(input, output, session) {
   # Update indicator choices based on metric type
   observe({
     if (input$metric_type == "exposure") {
-      exposure_cols <- names(data)[str_detect(names(data), "Change in fire probability")]
-      exposure_indicators <- unique(str_replace(exposure_cols, " (10th Percentile|Median|90th Percentile).*", ""))
+      # Get all exposure indicators
+      exposure_cols <- names(data)[str_detect(names(data), "Change in fire probability|Change in Runoff|Runoff Decrease Model")]
+      
+      # Extract base indicator names
+      exposure_indicators <- unique(c(
+        str_replace(exposure_cols[str_detect(exposure_cols, "Change in fire probability")], " (10th Percentile|Median|90th Percentile).*", ""),
+        str_replace(exposure_cols[str_detect(exposure_cols, "Change in Runoff")], " (10th Percentile|Median|90th Percentile).*", ""),
+        str_replace(exposure_cols[str_detect(exposure_cols, "Runoff Decrease Model")], " Percentage.*", "")
+      ))
       
       updateSelectInput(session, "color_var",
                         choices = setNames(exposure_indicators, exposure_indicators),
@@ -249,7 +265,13 @@ server <- function(input, output, session) {
     matching_cols <- names(data)[str_detect(names(data), paste0("^", str_escape(input$color_var)))]
     
     if (input$metric_type == "exposure") {
-      value_parts <- str_extract(matching_cols, "(10th Percentile|Median|90th Percentile)")
+      if (str_detect(input$color_var, "Runoff Decrease Model")) {
+        # For Runoff Decrease Model, extract "Percentage"
+        value_parts <- str_extract(matching_cols, "Percentage")
+      } else {
+        # For other exposure variables, extract percentiles
+        value_parts <- str_extract(matching_cols, "(10th Percentile|Median|90th Percentile)")
+      }
     } else {
       value_parts <- str_extract(matching_cols, "Mean")
     }
@@ -273,7 +295,6 @@ server <- function(input, output, session) {
     
     return(base_name)
   })
-  
   # Initialize the base map once
   output$map <- renderLeaflet({
     leaflet() %>%
@@ -293,11 +314,24 @@ server <- function(input, output, session) {
     plot_data <- data[!is.na(var_values), ]
     var_values_clean <- var_values[!is.na(var_values)]
     
-    # Create color palette with better colors for government use
-    pal <- colorNumeric(
-      palette = c("#ffffcc", "#fed976", "#fd8d3c", "#f03b20", "#bd0026"),
-      domain = var_values_clean
-    )
+    # Check if this is a Change in Runoff variable (smaller values = higher risk)
+    is_runoff_change <- str_detect(selected_column(), "Change in Runoff")
+    
+    # Create color palette - reverse for Change in Runoff
+    if (is_runoff_change) {
+      pal <- colorNumeric(
+        palette = c("#bd0026", "#f03b20", "#fd8d3c", "#fed976", "#ffffcc"),
+        domain = var_values_clean
+      )
+      # For runoff change: smaller values get larger circles
+      size_values <- -var_values_clean  # Negate so smaller becomes larger
+    } else {
+      pal <- colorNumeric(
+        palette = c("#ffffcc", "#fed976", "#fd8d3c", "#f03b20", "#bd0026"),
+        domain = var_values_clean
+      )
+      size_values <- var_values_clean
+    }
     
     # Create dynamic title for legend
     legend_title <- if(input$var_type == "Ranking") {
@@ -311,7 +345,13 @@ server <- function(input, output, session) {
       clearControls() %>%
       addCircleMarkers(
         data = plot_data,
-        radius = ~ pmax(4, pmin(16, scales::rescale(get(selected_column()), to = c(4, 16)))),
+        radius = ~ if(str_detect(selected_column(), "Change in Runoff")) {
+          # For Change in Runoff: more negative values (closer to -70) = larger circles
+          pmax(4, pmin(16, scales::rescale(-get(selected_column()), to = c(4, 16))))
+        } else {
+          # For other variables: higher values = larger circles
+          pmax(4, pmin(16, scales::rescale(get(selected_column()), to = c(4, 16))))
+        },
         color = "#2c2c2c",
         fillColor = ~ pal(get(selected_column())),
         fillOpacity = 0.8,
