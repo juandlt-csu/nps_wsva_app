@@ -13,7 +13,7 @@ parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg")
 
 # read in water supply database
 water_supplies <- read_csv("app_data/water_supplies.csv")%>% 
-  mutate(id = wsd_system_id)
+  mutate(id = water_supply_id)
 
 # read in indicators
 fire_exp <- read_csv("app_data/fire_exp_2025-08-26.csv")
@@ -29,7 +29,7 @@ runoff <- read_csv("app_data/runoff_vulnerability_indicator.csv") %>%
   )))
 
 data <- reduce(list(water_supplies, fire_exp, fire_sen, runoff), left_join, by = "id") %>% 
-  select(source_longitude, source_latitude, park_name, region, state, park_unit, water_system_name, wsd_system_id, names(fire_exp)[-c(1:2)],
+  select(source_longitude, source_latitude, park_name, region, state, park_code, water_system_name, water_supply_id, names(fire_exp)[-c(1:2)],
          names(fire_sen)[-c(1:2)], names(runoff)[-1])  %>% 
   # change beginning string
   rename_with(~str_replace(.x, "delta_fp", "Change in fire probability "), 
@@ -362,8 +362,8 @@ server <- function(input, output, session) {
           "<b style='color: #2d5a27;'>", selected_column(), ":</b><br>",
           "<span style='font-size: 14px; font-weight: bold;'>", 
           round(get(selected_column()), 3), "</span><br><br>",
-          "<b>Water Supply ID:</b> ", wsd_system_id, "<br>",
-          "<b>Park Unit:</b> ", park_unit, "<br>",
+          "<b>Water Supply ID:</b> ", water_supply_id, "<br>",
+          "<b>Park Unit:</b> ", park_code, "<br>",
           "<b>Water System:</b> ", water_system_name, "<br>",
           "<b>State:</b> ", state,
           "</div>"
