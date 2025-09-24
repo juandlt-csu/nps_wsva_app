@@ -8,48 +8,52 @@ library(scales)
 library(stringr)
 library(purrr)
 
-# load in data
+############# DATA ############
 parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg")
 
 # read in water supply database
-water_supplies <- read_csv("app_data/water_supplies.csv")%>% 
-  mutate(id = water_supply_id)
+water_supplies <- read_csv("app_data/water_supplies.csv") %>% 
+  select(wsd_source_id, park_unit, park_name, region, state, 
+         water_system_name, source_longitude, source_latitude)
 
 # read in indicators
-fire_exp <- read_csv("app_data/fire_exp_2025-08-26.csv")
-fire_sen <- read_csv("app_data/fire_sen_2025-08-26.csv")
-runoff <- read_csv("app_data/runoff_vulnerability_indicator.csv") %>%
-  mutate(id = str_remove(wsd_source_id, "_0\\d+$")) %>% 
-  select(id, "Change in Runoff 10th Percentile" = p10_percent_change,
-         "Runoff Decrease Model Percentage" = percent_models_negative) %>% 
-  mutate(mutate(across(
-    where(is.numeric),
-    .fns = list(pcntl = ~ cume_dist(.) * 100),
-    .names = "{col}_{fn}"
-  )))
+fire_exp <- read_csv("app_data/fire_exposure_2025-09-09.csv")
+fire_sen <- read_csv("app_data/fire_sensitivity_2025-09-22.csv")
+runoff <- read_csv("app_data/runoff_exposure_2025-09-18.csv")
 
-data <- reduce(list(water_supplies, fire_exp, fire_sen, runoff), left_join, by = "id") %>% 
-  select(source_longitude, source_latitude, park_name, region, state, park_code, water_system_name, water_supply_id, names(fire_exp)[-c(1:2)],
-         names(fire_sen)[-c(1:2)], names(runoff)[-1])  %>% 
-  # change beginning string
-  rename_with(~str_replace(.x, "delta_fp", "Change in fire probability "), 
-              .cols = contains("delta_fp")) %>% 
-  rename_with(~str_replace(.x, "mean_whp", "Wildfire hazard potential "), 
-              .cols = contains("mean_whp")) %>% 
-  # change end string
-  rename_with(~str_replace(.x, "_p10", "10th Percentile"), 
-              .cols = contains("_p10")) %>% 
-  rename_with(~str_replace(.x, "_p50", "Median"), 
-              .cols = contains("_p50")) %>% 
-  rename_with(~str_replace(.x, "_p90", "90th Percentile"), 
-              .cols = contains("_p90")) %>% 
-  rename_with(~str_replace(.x, "_ws_buffer", "Mean"), 
-              .cols = contains("_ws_buffer")) %>% 
+# combine all indicators
+combined_data <- reduce(list(water_supplies, fire_exp, fire_sen, runoff), left_join, by = c("wsd_source_id", "park_name", "park_unit")) %>% 
   st_as_sf(coords = c("source_longitude", "source_latitude"), crs = 4326)
 
-vars <- names(data)[str_detect(names(data), "Percentile|Median|Mean|Percentage")]
+# Define indicator structure for UI
+indicator_config <- list(
+  exposure = list(
+    "Fire Probability Change" = list(
+      base_name = "fire_prob_change",
+      measures = c("10th Percentile" = "p10", "Median" = "p50", "90th Percentile" = "p90"),
+      description = "Projected change in likelihood of wildfire"
+    ),
+    "Runoff Change" = list(
+      base_name = "runoff_change", 
+      measures = c("10th Percentile" = "p10", "Median" = "p50", "90th Percentile" = "p90"),
+      description = "Projected change in runoff"
+    ),
+    "Models Showing Runoff Decrease" = list(
+      base_name = "models_showing_decrease",
+      measures = c("Percentage" = "pct"),
+      description = "Percentage of climate models projecting runoff decrease"
+    )
+  ),
+  sensitivity = list(
+    "Wildfire Hazard Potential" = list(
+      base_name = "wildfire_hazard",
+      measures = c("Mean" = "mean"),
+      description = "Current wildfire hazard potential"
+    )
+  )
+)
 
-# UI with enhanced styling
+###################### UI ###############################
 ui <- fluidPage(
   tags$head(
     tags$style(HTML("
@@ -160,58 +164,51 @@ ui <- fluidPage(
   div(class = "control-panel",
       fluidRow(
         column(3,
-               div(
-                 h5("Risk Category", style = "color: #2d5a27; margin-bottom: 15px;"),
-                 radioButtons(
-                   "metric_type",
-                   label = NULL,
-                   choices = list(
-                     "Exposure" = "exposure", 
-                     "Sensitivity" = "sensitivity"
-                   ),
-                   selected = "exposure",
-                   inline = FALSE
-                 )
+               h5("Risk Category", style = "color: #2d5a27; margin-bottom: 15px;"),
+               radioButtons(
+                 "risk_category",
+                 label = NULL,
+                 choices = list(
+                   "Exposure" = "exposure",
+                   "Sensitivity" = "sensitivity"
+                 ),
+                 selected = "exposure"
                )
         ),
         column(3,
                selectInput(
-                 "color_var",
+                 "indicator",
                  label = tags$span("Risk Indicator", style = "color: #2d5a27; font-weight: 600;"),
-                 choices = NULL,
-                 width = "100%"
+                 choices = NULL
                )
         ),
         column(3,
                selectInput(
-                 "value",
+                 "measure",
                  label = tags$span("Statistical Measure", style = "color: #2d5a27; font-weight: 600;"),
-                 choices = NULL,
-                 width = "100%"
+                 choices = NULL
                )
         ),
         column(3,
-               div(
-                 h5("Data Type", style = "color: #2d5a27; margin-bottom: 15px;"),
-                 radioButtons(
-                   "var_type",
-                   label = NULL,
-                   choices = list(
-                     "Actual Values" = "Raw Value",
-                     "Percentile Ranking" = "Ranking"
-                   ),
-                   selected = "Raw Value",
-                   inline = FALSE
-                 )
+               h5("Data Type", style = "color: #2d5a27; margin-bottom: 15px;"),
+               radioButtons(
+                 "data_type",
+                 label = NULL,
+                 choices = list(
+                   "Raw Values" = "raw",
+                   "Percentile Ranking" = "rank"
+                 ),
+                 selected = "raw"
                )
         )
       ),
       
+      # Information box
       div(class = "info-box",
           h4(icon("info-circle"), " How to Use This Tool"),
-          p("Select a risk category (Exposure or Sensitivity), choose your indicator and statistical measure, 
-            then select whether to view actual values or percentile rankings. Larger, darker red circles 
-            indicate higher risk values. Click on any point for detailed information.")
+          p("Select a risk category, indicator, and statistical measure. Choose between raw values or percentile rankings. 
+            Larger, darker circles indicate higher risk. Click points for detailed information."),
+          textOutput("indicator_description")
       )
   ),
   
@@ -232,69 +229,102 @@ ui <- fluidPage(
 # Server
 server <- function(input, output, session) {
   
-  # Update indicator choices based on metric type
+  # Update indicator choices based on risk category
   observe({
-    if (input$metric_type == "exposure") {
-      # Get all exposure indicators
-      exposure_cols <- names(data)[str_detect(names(data), "Change in fire probability|Change in Runoff|Runoff Decrease Model")]
-      
-      # Extract base indicator names
-      exposure_indicators <- unique(c(
-        str_replace(exposure_cols[str_detect(exposure_cols, "Change in fire probability")], " (10th Percentile|Median|90th Percentile).*", ""),
-        str_replace(exposure_cols[str_detect(exposure_cols, "Change in Runoff")], " (10th Percentile|Median|90th Percentile).*", ""),
-        str_replace(exposure_cols[str_detect(exposure_cols, "Runoff Decrease Model")], " Percentage.*", "")
-      ))
-      
-      updateSelectInput(session, "color_var",
-                        choices = setNames(exposure_indicators, exposure_indicators),
-                        selected = exposure_indicators[1])
-    } else if (input$metric_type == "sensitivity") {
-      sensitivity_cols <- names(data)[str_detect(names(data), "Wildfire hazard potential")]
-      sensitivity_indicators <- unique(str_replace(sensitivity_cols, " Mean.*", ""))
-      
-      updateSelectInput(session, "color_var",
-                        choices = setNames(sensitivity_indicators, sensitivity_indicators),
-                        selected = sensitivity_indicators[1])
-    }
-  })
-  
-  # Update value choices based on selected indicator
-  observe({
-    req(input$color_var)
+    category_indicators <- indicator_config[[input$risk_category]]
+    indicator_choices <- names(category_indicators)
+    names(indicator_choices) <- indicator_choices
     
-    matching_cols <- names(data)[str_detect(names(data), paste0("^", str_escape(input$color_var)))]
-    
-    if (input$metric_type == "exposure") {
-      if (str_detect(input$color_var, "Runoff Decrease Model")) {
-        # For Runoff Decrease Model, extract "Percentage"
-        value_parts <- str_extract(matching_cols, "Percentage")
-      } else {
-        # For other exposure variables, extract percentiles
-        value_parts <- str_extract(matching_cols, "(10th Percentile|Median|90th Percentile)")
-      }
+    # Set default indicator based on category
+    default_indicator <- if(input$risk_category == "exposure") {
+      "Runoff Change"  # Default to runoff for exposure
     } else {
-      value_parts <- str_extract(matching_cols, "Mean")
+      indicator_choices[1]  # First indicator for sensitivity
     }
     
-    unique_values <- unique(value_parts[!is.na(value_parts)])
-    
-    updateSelectInput(session, "value",
-                      choices = setNames(unique_values, unique_values),
-                      selected = unique_values[1])
+    updateSelectInput(
+      session, 
+      "indicator",
+      choices = indicator_choices,
+      selected = default_indicator
+    )
   })
   
-  # Create the actual column name based on all selections
-  selected_column <- reactive({
-    req(input$color_var, input$value, input$var_type)
+  # Update measure choices based on selected indicator
+  observe({
+    req(input$indicator, input$risk_category)
     
-    base_name <- paste(input$color_var, input$value)
+    indicator_info <- indicator_config[[input$risk_category]][[input$indicator]]
+    measure_choices <- indicator_info$measures
     
-    if (input$var_type == "Ranking") {
-      base_name <- paste0(base_name, "_pcntl")
+    # Set default measure - 10th Percentile for Runoff Change, otherwise first option
+    default_measure <- if(input$indicator == "Runoff Change" && "10th Percentile" %in% names(measure_choices)) {
+      "10th Percentile"
+    } else {
+      names(measure_choices)[1]
     }
     
-    return(base_name)
+    updateSelectInput(
+      session,
+      "measure", 
+      choices = measure_choices,
+      selected = measure_choices[default_measure]
+    )
   })
+  
+  # Generate column name based on selections
+  column_name <- reactive({
+    req(input$risk_category, input$indicator, input$measure, input$data_type)
+    
+    # Get base name and measure
+    indicator_info <- indicator_config[[input$risk_category]][[input$indicator]]
+    base_name <- indicator_info$base_name
+    measure_code <- input$measure
+    
+    # Create standardized column name
+    col_name <- paste(input$data_type, base_name, measure_code, sep = "_")
+    
+    # Validate column exists in data
+    if (!col_name %in% names(combined_data)) {
+      # Try alternative naming patterns for backwards compatibility
+      alt_names <- c(
+        paste0(base_name, "_", measure_code),
+        paste0("raw_", base_name, "_", measure_code),
+        paste0("rank_", base_name, "_", measure_code)
+      )
+      
+      existing_alt <- alt_names[alt_names %in% names(combined_data)]
+      if (length(existing_alt) > 0) {
+        col_name <- existing_alt[1]
+      }
+    }
+    
+    return(col_name)
+  })
+  
+  # Filter data for mapping
+  map_data <- reactive({
+    req(column_name())
+    
+    # Check if column exists
+    if (!column_name() %in% names(combined_data)) {
+      return(NULL)
+    }
+    
+    # Filter out missing values
+    filtered_data <- combined_data[!is.na(combined_data[[column_name()]]), ]
+    
+    return(filtered_data)
+  })
+  
+  # Display indicator description
+  output$indicator_description <- renderText({
+    req(input$risk_category, input$indicator)
+    
+    indicator_info <- indicator_config[[input$risk_category]][[input$indicator]]
+    indicator_info$description
+  })
+  
   # Initialize the base map once
   output$map <- renderLeaflet({
     leaflet() %>%
@@ -302,81 +332,102 @@ server <- function(input, output, session) {
       setView(lng = -98.5, lat = 39.8, zoom = 4)
   })
   
-  # Update map markers when variable changes
+  # Update map when selections change
   observe({
-    req(selected_column())
+    req(map_data(), column_name())
     
-    if (!selected_column() %in% names(data)) {
+    plot_data <- map_data()
+    
+    if (nrow(plot_data) == 0) {
+      # Clear map if no data
+      leafletProxy("map") %>%
+        clearMarkers() %>%
+        clearControls()
       return()
     }
     
-    var_values <- data[[selected_column()]]
-    plot_data <- data[!is.na(var_values), ]
-    var_values_clean <- var_values[!is.na(var_values)]
+    # Get values for mapping
+    values <- plot_data[[column_name()]]
     
-    # Check if this is a Change in Runoff variable (smaller values = higher risk)
-    is_runoff_change <- str_detect(selected_column(), "Change in Runoff")
+    # Determine if this is a "lower is worse" indicator (like runoff change)
+    is_inverse_risk <- str_detect(column_name(), "runoff_change")
     
-    # Create color palette - reverse for Change in Runoff
-    if (is_runoff_change) {
+    # Create color palette
+    if (is_inverse_risk) {
+      # For runoff change: more negative = higher risk (red)
       pal <- colorNumeric(
         palette = c("#bd0026", "#f03b20", "#fd8d3c", "#fed976", "#ffffcc"),
-        domain = var_values_clean
+        domain = values
       )
-      # For runoff change: smaller values get larger circles
-      size_values <- -var_values_clean  # Negate so smaller becomes larger
+      # Size mapping: more negative values get larger circles
+      size_values <- -values
     } else {
+      # Standard: higher values = higher risk (red)
       pal <- colorNumeric(
         palette = c("#ffffcc", "#fed976", "#fd8d3c", "#f03b20", "#bd0026"),
-        domain = var_values_clean
+        domain = values
       )
-      size_values <- var_values_clean
+      size_values <- values
     }
     
-    # Create dynamic title for legend
-    legend_title <- if(input$var_type == "Ranking") {
-      paste0(str_wrap(input$color_var, 20), "\n", input$value, " (Percentile)")
-    } else {
-      paste0(str_wrap(input$color_var, 20), "\n", input$value)
-    }
+    # Create dynamic legend title
+    legend_title <- paste0(
+      str_wrap(input$indicator, 20), "\n",
+      input$measure,
+      if (input$data_type == "rank") " (Percentile)" else ""
+    )
     
+    # Update map
     leafletProxy("map") %>%
       clearMarkers() %>%
       clearControls() %>%
       addCircleMarkers(
         data = plot_data,
-        radius = ~ if(str_detect(selected_column(), "Change in Runoff")) {
-          # For Change in Runoff: more negative values (closer to -70) = larger circles
-          pmax(4, pmin(16, scales::rescale(-get(selected_column()), to = c(4, 16))))
-        } else {
-          # For other variables: higher values = larger circles
-          pmax(4, pmin(16, scales::rescale(get(selected_column()), to = c(4, 16))))
-        },
+        radius = ~ pmax(4, pmin(16, scales::rescale(
+          if (is_inverse_risk) -get(column_name()) else get(column_name()),
+          to = c(4, 16)
+        ))),
         color = "#2c2c2c",
-        fillColor = ~ pal(get(selected_column())),
+        fillColor = ~ pal(get(column_name())),
         fillOpacity = 0.8,
         stroke = TRUE,
         weight = 1,
-        popup = ~ paste0(
-          "<div style='font-family: Arial; font-size: 12px;'>",
-          "<b style='color: #2d5a27;'>", selected_column(), ":</b><br>",
-          "<span style='font-size: 14px; font-weight: bold;'>", 
-          round(get(selected_column()), 3), "</span><br><br>",
-          "<b>Water Supply ID:</b> ", water_supply_id, "<br>",
-          "<b>Park Unit:</b> ", park_code, "<br>",
-          "<b>Water System:</b> ", water_system_name, "<br>",
-          "<b>State:</b> ", state,
-          "</div>"
+        popup = ~ create_popup(
+          indicator = input$indicator,
+          measure = input$measure,
+          value = get(column_name()),
+          wsd_source_id = wsd_source_id,
+          park_unit = park_unit,
+          park_name = park_name,
+          water_system_name = water_system_name,
+          state = state
         )
       ) %>%
       addLegend(
         pal = pal,
-        values = var_values_clean,
+        values = values,
         title = legend_title,
         position = "bottomright",
         opacity = 0.9
       )
   })
+  
+  # Create standardized popup content
+  create_popup <- function(indicator, measure, value, wsd_source_id, 
+                           park_unit, park_name, water_system_name, state) {
+    paste0(
+      "<div style='font-family: Arial; font-size: 12px;'>",
+      "<b style='color: #2d5a27; font-size: 14px;'>", indicator, "</b><br>",
+      "<b>", measure, ":</b> <span style='font-size: 14px; font-weight: bold;'>", 
+      round(value, 3), "</span><br><br>",
+      "<b>Water Supply ID:</b> ", wsd_source_id, "<br>",
+      "<b>Park Unit:</b> ", park_unit, "<br>",
+      "<b>Park Name:</b> ", park_name, "<br>",
+      "<b>Water System:</b> ", water_system_name, "<br>",
+      "<b>State:</b> ", state,
+      "</div>"
+    )
+  }
 }
 
 # Run the application
