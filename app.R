@@ -1,5 +1,6 @@
 library(shiny)
 library(leaflet)
+library(leaflegend)
 library(sf)
 library(readxl)
 library(dplyr)
@@ -7,9 +8,15 @@ library(readr)
 library(scales)
 library(stringr)
 library(purrr)
+library(later)
+library(promises)
+library(future)
+plan(multisession)
 
 ############# DATA ############
-parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg")
+parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg") %>% 
+  st_transform(st_crs = 4326) #%>% 
+  #st_simplify(5000)
 
 # read in water supply database
 water_supplies <- read_csv("app_data/water_supplies.csv") %>% 
@@ -20,9 +27,10 @@ water_supplies <- read_csv("app_data/water_supplies.csv") %>%
 fire_exp <- read_csv("app_data/fire_exposure_2025-09-09.csv")
 fire_sen <- read_csv("app_data/fire_sensitivity_2025-09-22.csv")
 runoff <- read_csv("app_data/runoff_exposure_2025-09-18.csv")
+flood_sen <- read_csv("app_data/flood_sensitivity_2026-01-21.csv")
 
 # combine all indicators
-combined_data <- reduce(list(water_supplies, fire_exp, fire_sen, runoff), left_join, by = c("wsd_source_id", "park_name", "park_unit")) %>% 
+combined_data <- reduce(list(water_supplies, fire_exp, fire_sen, runoff, flood_sen), left_join, by = c("wsd_source_id", "park_name", "park_unit")) %>% 
   st_as_sf(coords = c("source_longitude", "source_latitude"), crs = 4326)
 
 # Define indicator structure for UI
@@ -49,6 +57,11 @@ indicator_config <- list(
       base_name = "wildfire_hazard",
       measures = c("Mean" = "mean"),
       description = "Current wildfire hazard potential"
+    ),
+    "Flood Sensitivity" = list(
+      base_name = "flood_risk",
+      measures = c("Percent Area" = "percent"),
+      description = "Percent surrounding area that is within a high-risk flood zone."
     )
   )
 )
@@ -158,6 +171,25 @@ ui <- fluidPage(
         border-color: #2d5a27;
         box-shadow: 0 0 0 0.2rem rgba(45, 90, 39, 0.25);
       }
+      
+      .loading-overlay {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 20px 30px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        z-index: 1000;
+        border-left: 4px solid #2d5a27;
+}
+
+      .loading-overlay h4 {
+        margin: 0;
+        color: #2d5a27;
+        font-weight: 600;
+}
     "))
   ),
   
@@ -225,6 +257,12 @@ ui <- fluidPage(
     column(12,
            div(style = "position: relative;",
                uiOutput("map_title"),
+               conditionalPanel(
+                 condition = "output.parks_loading",
+                 div(class = "loading-overlay",
+                     h4(icon("spinner", class = "fa-spin"), " Loading park boundaries...")
+                 )
+               ),
                leafletOutput("map", height = "calc(100vh - 300px)")
            )
     )
@@ -239,6 +277,14 @@ ui <- fluidPage(
 
 # Server
 server <- function(input, output, session) {
+  
+  # Reactive value to track parks loading state
+  parks_loading <- reactiveVal(FALSE)
+  
+  output$parks_loading <- reactive({
+    parks_loading()
+  })
+  outputOptions(output, "parks_loading", suspendWhenHidden = FALSE)
   
   # Update indicator choices based on risk category
   observe({
@@ -322,10 +368,11 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
-    # Filter out missing values
-    filtered_data <- combined_data[!is.na(combined_data[[column_name()]]), ]
+    # KEEP NAs for internal use --- Filter out missing values
+   # filtered_data <- combined_data[!is.na(combined_data[[column_name()]]), ]
     
-    return(filtered_data)
+    #return(filtered_data)
+    return(combined_data)
   })
   
   # Display indicator description
@@ -359,12 +406,56 @@ server <- function(input, output, session) {
     )
   })
   
-  # Initialize the base map once
+  # Initialize the base map once (without parks)
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$CartoDB.Positron) %>%
-      setView(lng = -98.5, lat = 39.8, zoom = 4)
+      setView(lng = -98.5, lat = 39.8, zoom = 4) %>%
+      addMapPane("background", zIndex = 410) %>%  # Below default marker pane (zIndex 600)
+      addLayersControl(
+        overlayGroups = c("Park Boundaries"),
+        options = layersControlOptions(collapsed = FALSE),
+        position = "topleft"
+      ) %>%
+      hideGroup("Park Boundaries")
   })
+  
+  
+  # Handle parks layer toggle
+  observeEvent(input$map_groups, {
+    if ("Park Boundaries" %in% input$map_groups) {
+      # User turned on parks layer - show loading immediately
+      parks_loading(TRUE)
+
+      # Small delay to let UI update
+      Sys.sleep(0.3)
+
+      leafletProxy("map", session = session) %>%
+        addPolygons(
+          data = parks,
+          group = "Park Boundaries",
+          fillColor = "lightgreen",
+          fillOpacity = 0.1,
+          color = "#2d5a27",
+          weight = 1.5,
+          opacity = 0.6,
+          options = pathOptions(pane = "background"),
+          popup = ~paste0(
+            "<div style='font-family: Arial; font-size: 12px;'>",
+            "<b style='color: #2d5a27; font-size: 14px;'>", UNIT_NAME, "</b><br>",
+            "<b>Park Code:</b> ", UNIT_CODE,
+            "</div>"
+          )
+        )
+
+      parks_loading(FALSE)
+
+    } else {
+      # User turned off parks layer
+      leafletProxy("map", session = session) %>%
+        clearGroup("Park Boundaries")
+    }
+  }, ignoreNULL = FALSE)
   
   # Update map when selections change
   observe({
@@ -391,15 +482,27 @@ server <- function(input, output, session) {
       # For runoff change: more negative = higher risk (red)
       pal <- colorNumeric(
         palette = c("#bd0026", "#f03b20", "#fd8d3c", "#fed976", "#ffffcc"),
-        domain = values
+        domain = values,
+        na.color = "lightgrey"
       )
       # Size mapping: more negative values get larger circles
       size_values <- -values
+      
+      # add NA color for flood to see missing data
+    } else if (str_detect(column_name(), "flood")) {
+      # Standard: higher values = higher risk (red)
+      pal <- colorNumeric(
+        palette = c("#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"),
+        domain = values,
+        na.color = "lightgrey"
+      )
+      size_values <- values
     } else {
       # Standard: higher values = higher risk (red)
       pal <- colorNumeric(
         palette = c("#ffffcc", "#fed976", "#fd8d3c", "#f03b20", "#bd0026"),
-        domain = values
+        domain = values,
+        na.color = "lightgrey"
       )
       size_values <- values
     }
@@ -417,13 +520,14 @@ server <- function(input, output, session) {
       clearControls() %>%
       addCircleMarkers(
         data = plot_data,
-        radius = ~ pmax(4, pmin(16, scales::rescale(
-          if (is_inverse_risk) -get(column_name()) else get(column_name()),
-          to = c(4, 16)
-        ))),
+        radius = ~ ifelse(is.na(get(column_name())), 3,  # Larger size for NAs
+                          pmax(4, pmin(16, scales::rescale(
+                            if (is_inverse_risk) -get(column_name()) else get(column_name()),
+                            to = c(4, 16)
+                          )))),
         color = "#2c2c2c",
         fillColor = ~ pal(get(column_name())),
-        fillOpacity = 0.8,
+        fillOpacity = 0.9,
         stroke = TRUE,
         weight = 1,
         popup = ~ create_popup(
@@ -437,12 +541,13 @@ server <- function(input, output, session) {
           state = state
         )
       ) %>%
-      addLegend(
+      addLegendNumeric(
         pal = pal,
-        values = values,
+        values = c(values, NA),
         title = legend_title,
-        position = "bottomright",
-        opacity = 0.9
+        naLabel = "No Data",
+        position = "bottomright"#,
+        #opacity = 0.9
       )
   })
   
