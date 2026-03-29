@@ -25,8 +25,7 @@ water_supplies <- read_csv("app_data/water_supplies.csv") %>%
   select(wsd_source_id, park_unit, park_name, region, state,
          water_system_name, source_longitude, source_latitude)
 
-final_index <- read_csv("app_data/final_index.csv") %>%
-  select(-c(park_unit, park_name))
+final_index <- read_csv("app_data/final_index.csv")
 
 combined_data <- water_supplies %>%
   left_join(final_index, by = "wsd_source_id") %>%
@@ -472,7 +471,7 @@ server <- function(input, output, session) {
       tagList(
         p(style = "color:#2d5a27; font-weight:600; font-size:0.9rem; margin-top:8px;",
           paste0("Showing ", n, " of ", tot, " water supplies"),
-          span(class = "filter-badge", "Scores recalculated within filter"))
+          tags$span(class = "filter-badge", "Scores recalculated within filter"))
       )
     }
   })
