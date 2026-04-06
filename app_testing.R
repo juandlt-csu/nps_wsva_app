@@ -2,6 +2,7 @@ library(shiny)
 library(leaflet)
 library(leaflegend)
 library(htmlwidgets)
+library(shinyWidgets)
 library(sf)
 library(dplyr)
 library(readr)
@@ -17,6 +18,9 @@ plan(multisession)
 
 ############# DATA ############
 
+# Source the vulnerability index calculation function
+source("calc_vulnerability_index.R")
+
 # Simplify park boundaries at load time for faster rendering
 parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg") %>%
   st_transform(crs = 4326) %>%
@@ -26,91 +30,75 @@ water_supplies <- read_csv("app_data/water_supplies.csv") %>%
   select(wsd_source_id, park_unit, park_name, region, state,
          water_system_name, source_longitude, source_latitude)
 
-final_index <- read_csv("app_data/final_index.csv")
+# Raw indicators — vulnerability scores are calculated on the fly
+final_indicators <- read_csv("app_data/final_indicators.csv")
 
-combined_data <- water_supplies %>%
-  left_join(final_index, by = "wsd_source_id") %>%
+# Join metadata + raw indicators, calculate national scores, convert to sf
+combined_raw <- water_supplies %>%
+  left_join(final_indicators, by = "wsd_source_id")
+
+combined_data <- calc_vulnerability_index(combined_raw) %>%
   st_as_sf(coords = c("source_longitude", "source_latitude"), crs = 4326)
 
 # Pre-compute filter options
 all_regions <- sort(unique(na.omit(combined_data$region)))
 all_states  <- sort(unique(na.omit(combined_data$state)))
-
-# Normalized indicator columns used in vulnerability score calculation
-exp_ind_cols <- c("exp_runoff_change", "exp_runoff_model_agree",
-                  "exp_precip_change", "exp_precip_model_agree",
-                  "exp_inundation_slr", "exp_fire_prob_change")
-sen_ind_cols <- c("sen_visitation_trend", "sen_competition",
-                  "sen_wildfire_hazard", "sen_flood_risk",
-                  "sen_inundation_current", "sen_runoff_trend", "sen_precip_trend")
-
-# Helper functions — mirror vulnerability_index_calculation.Rmd
-minmax_norm <- function(x, na.rm = TRUE) {
-  rng <- range(x, na.rm = na.rm)
-  if (is.na(rng[1]) || rng[2] == rng[1]) return(rep(0, length(x)))
-  (x - rng[1]) / (rng[2] - rng[1])
-}
-euclid_agg <- function(df) sqrt(rowSums(df^2, na.rm = TRUE))
-agg_norm   <- function(df) minmax_norm(euclid_agg(df))
-
-# Recalculate vulnerability scores within a filtered subset, keeping the
-# same Euclidean-distance framework used in the Rmd workflow.
-recalc_vuln <- function(df) {
-  df <- as.data.frame(df)
-  
-  exp_df  <- df[, exp_ind_cols, drop = FALSE]
-  sen_df  <- df[, sen_ind_cols, drop = FALSE]
-  
-  exp_score <- agg_norm(exp_df)
-  sen_score <- agg_norm(sen_df)
-  vuln_raw  <- sqrt(exp_score^2 + sen_score^2)
-  
-  df$EXPOSURE       <- exp_score
-  df$SENSITIVITY    <- sen_score
-  df$VULNERABILITY  <- minmax_norm(vuln_raw)
-  df
-}
+all_parks   <- sort(unique(na.omit(combined_data$park_unit)))
 
 # ---------------------------------------------------------------------------
 # Indicator config: Component -> Factor -> Indicator
+# col = normalized column name (for map display)
+# raw_col = raw indicator column name (from final_indicators)
 # ---------------------------------------------------------------------------
 indicator_config <- list(
   
   "Exposure" = list(
     "Runoff" = list(
       "Change in Runoff" = list(
-        col = "exp_runoff_change", raw_col = "raw_runoff_change",
+        col = "norm_exp_runoff_change", raw_col = "exp_runoff_change",
         raw_label = "% change mean annual runoff (p10)",
         description = "Projected % change in mean annual runoff (p10)"
       ),
       "Runoff Model Agreement" = list(
-        col = "exp_runoff_model_agree", raw_col = "raw_runoff_model_agree",
+        col = "norm_exp_runoff_model_agree", raw_col = "exp_runoff_model_agree",
         raw_label = "% GCMs predicting decrease",
         description = "% of GCMs predicting a decrease in runoff"
       )
     ),
     "Precipitation" = list(
       "Change in Precipitation" = list(
-        col = "exp_precip_change", raw_col = "raw_precip_change",
+        col = "norm_exp_precip_change", raw_col = "exp_precip_change",
         raw_label = "% change mean annual precip (p10)",
         description = "Projected % change in mean annual precipitation (p10)"
       ),
       "Precipitation Model Agreement" = list(
-        col = "exp_precip_model_agree", raw_col = "raw_precip_model_agree",
+        col = "norm_exp_precip_model_agree", raw_col = "exp_precip_model_agree",
         raw_label = "% models predicting decrease",
         description = "% of climate models predicting a precipitation decrease"
       )
     ),
+    "SWE" = list(
+      "Change in SWE" = list(
+        col = "norm_exp_swe_change", raw_col = "exp_swe_change",
+        raw_label = "% change mean annual SWE (p10)",
+        description = "Projected % change in mean annual snow water equivalent (p10)"
+      ),
+      "SWE Model Agreement" = list(
+        col = "norm_exp_swe_model_agree", raw_col = "exp_swe_model_agree",
+        raw_label = "% models predicting decrease",
+        description = "% of climate models predicting a decrease in SWE"
+      )
+    ),
     "Sea Level Rise" = list(
       "Inundation from Sea Level Rise" = list(
-        col = "exp_inundation_slr", raw_col = "raw_inundation_slr",
+        col = "norm_exp_inundation_slr", raw_col = "exp_inundation_slr",
         raw_label = "% point change in inundated area",
         description = "Projected % change in area inundated by sea level rise"
       )
     ),
     "Wildfire" = list(
       "Change in Fire Probability" = list(
-        col = "exp_fire_prob_change", raw_col = "raw_fire_prob_change",
+        col = "norm_exp_fire_prob_change", raw_col = "exp_fire_prob_change",
         raw_label = "% change fire probability (p90)",
         description = "Projected % change in probability of wildfire (p90)"
       )
@@ -120,82 +108,104 @@ indicator_config <- list(
   "Sensitivity" = list(
     "Demand" = list(
       "Historic Visitation Trend" = list(
-        col = "sen_visitation_trend", raw_col = "raw_visitation_trend",
+        col = "norm_sen_visitation_trend", raw_col = "sen_visitation_trend",
         raw_label = "Scaled visitation trend",
         description = "Historic trend in park visitation (scaled)"
       ),
       "Competition (Water Use Trend)" = list(
-        col = "sen_competition", raw_col = "raw_competition",
+        col = "norm_sen_competition", raw_col = "sen_competition",
         raw_label = "Water use trend slope (per km\u00b2)",
         description = "Trend in nearby county water use (competition for supply)"
       )
     ),
+    "Water Supply" = list(
+      "Water Supply Type" = list(
+        col = "norm_sen_water_supply_type", raw_col = "sen_water_supply_type",
+        raw_label = "Source type vulnerability (ordinal)",
+        description = "Water supply source type vulnerability rating"
+      )
+    ),
+    "Treatment" = list(
+      "Treatment Type" = list(
+        col = "norm_sen_treatment_type", raw_col = "sen_treatment_type",
+        raw_label = "Treatment level vulnerability (ordinal)",
+        description = "Water treatment level vulnerability rating"
+      )
+    ),
     "Wildfire" = list(
       "Current Wildfire Risk" = list(
-        col = "sen_wildfire_hazard", raw_col = "raw_wildfire_hazard",
+        col = "norm_sen_wildfire_hazard", raw_col = "sen_wildfire_hazard",
         raw_label = "Mean Wildfire Hazard Potential",
         description = "Current Wildfire Hazard Potential index"
       )
     ),
     "Flood" = list(
       "Current Flood Risk" = list(
-        col = "sen_flood_risk", raw_col = "raw_flood_risk",
+        col = "norm_sen_flood_risk", raw_col = "sen_flood_risk",
         raw_label = "% area in FEMA flood zone",
         description = "% of surrounding area in a high-risk FEMA flood zone"
       )
     ),
     "Sea Level Rise" = list(
       "Current Inundation" = list(
-        col = "sen_inundation_current", raw_col = "raw_inundation_current",
+        col = "norm_sen_inundation_current", raw_col = "sen_inundation_current",
         raw_label = "% catchment area inundated (reference)",
         description = "% of catchment area currently inundated (reference condition)"
       )
     ),
     "Runoff" = list(
       "Historic Runoff Trend" = list(
-        col = "sen_runoff_trend", raw_col = "raw_runoff_trend",
+        col = "norm_sen_runoff_trend", raw_col = "sen_runoff_trend",
         raw_label = "Mann-Kendall slope (30-yr runoff)",
         description = "30-year historic trend in runoff (Mann-Kendall slope)"
       )
     ),
     "Precipitation" = list(
       "Historic Precipitation Trend" = list(
-        col = "sen_precip_trend", raw_col = "raw_precip_trend",
+        col = "norm_sen_precip_trend", raw_col = "sen_precip_trend",
         raw_label = "Mann-Kendall slope (40-yr precip)",
         description = "40-year historic trend in precipitation (Mann-Kendall slope)"
+      )
+    ),
+    "SWE" = list(
+      "Historic SWE Trend" = list(
+        col = "norm_sen_swe_trend", raw_col = "sen_swe_trend",
+        raw_label = "Historic SWE trend",
+        description = "Historic trend in snow water equivalent"
       )
     )
   )
 )
 
 score_views <- list(
-  "Total Vulnerability Score"          = "VULNERABILITY",
-  "Exposure Score"                     = "EXPOSURE",
-  "Sensitivity Score"                  = "SENSITIVITY",
-  "Factor: Runoff Exposure"            = "factor_exp_runoff",
-  "Factor: Precipitation Exposure"     = "factor_exp_precip",
-  "Factor: Sea Level Rise Exposure"    = "factor_exp_slr",
-  "Factor: Wildfire Exposure"          = "factor_exp_wildfire",
-  "Factor: Demand Sensitivity"         = "factor_sen_demand",
-  "Factor: Wildfire Sensitivity"       = "factor_sen_wildfire",
-  "Factor: Flood Sensitivity"          = "factor_sen_flood",
-  "Factor: Sea Level Rise Sensitivity" = "factor_sen_slr",
-  "Factor: Runoff Sensitivity"         = "factor_sen_runoff",
-  "Factor: Precipitation Sensitivity"  = "factor_sen_precip"
+  "Vulnerability Score" = "VULNERABILITY",
+  "Exposure Score"      = "EXPOSURE",
+  "Sensitivity Score"   = "SENSITIVITY"
+)
+
+# Mapping from score name to its rank column
+score_rank_cols <- list(
+  "VULNERABILITY" = "VULNERABILITY_rank",
+  "EXPOSURE"      = "EXPOSURE_rank",
+  "SENSITIVITY"   = "SENSITIVITY_rank"
 )
 
 # Factor labels for the score breakdown chart
 factor_labels <- c(
-  "factor_exp_runoff"    = "Runoff\n(Exp)",
-  "factor_exp_precip"    = "Precip\n(Exp)",
-  "factor_exp_slr"       = "SLR\n(Exp)",
-  "factor_exp_wildfire"  = "Wildfire\n(Exp)",
-  "factor_sen_demand"    = "Demand\n(Sen)",
-  "factor_sen_wildfire"  = "Wildfire\n(Sen)",
-  "factor_sen_flood"     = "Flood\n(Sen)",
-  "factor_sen_slr"       = "SLR\n(Sen)",
-  "factor_sen_runoff"    = "Runoff\n(Sen)",
-  "factor_sen_precip"    = "Precip\n(Sen)"
+  "factor_exp_runoff"       = "Runoff\n(Exp)",
+  "factor_exp_precip"       = "Precip\n(Exp)",
+  "factor_exp_swe"          = "SWE\n(Exp)",
+  "factor_exp_slr"          = "SLR\n(Exp)",
+  "factor_exp_wildfire"     = "Wildfire\n(Exp)",
+  "factor_sen_demand"       = "Demand\n(Sen)",
+  "factor_sen_water_supply" = "Supply\n(Sen)",
+  "factor_sen_treatment"    = "Treatment\n(Sen)",
+  "factor_sen_wildfire"     = "Wildfire\n(Sen)",
+  "factor_sen_flood"        = "Flood\n(Sen)",
+  "factor_sen_slr"          = "SLR\n(Sen)",
+  "factor_sen_runoff"       = "Runoff\n(Sen)",
+  "factor_sen_precip"       = "Precip\n(Sen)",
+  "factor_sen_swe"          = "SWE\n(Sen)"
 )
 
 ###################### UI ###############################
@@ -302,7 +312,7 @@ ui <- fluidPage(
             <strong>Component &rarr; Factor &rarr; Indicator</strong>.
             Filter by region or state to recalculate scores relative to that subset.")),
                        div(class = "info-section-title", icon("exclamation-triangle"), " Priority & Hazard Flags"),
-                       p(HTML("Water supplies in the <strong>top 10% nationally</strong> for overall vulnerability
+                       p(HTML("Water supplies in the <strong>top 25% nationally</strong> for overall vulnerability
             are flagged as <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
             Popups also display hazard-specific flags when a supply scores in the top percentiles for
             individual threats:
@@ -324,11 +334,17 @@ ui <- fluidPage(
         
         conditionalPanel(
           condition = "input.view_mode == 'score'",
-          column(5,
+          column(4,
                  selectInput("score_view",
                              label = tags$span("Score", style = "color:#1D3557; font-weight:600;"),
                              choices = names(score_views),
-                             selected = "Total Vulnerability Score")
+                             selected = "Vulnerability Score")
+          ),
+          column(3,
+                 selectInput("score_metric",
+                             label = tags$span("Display", style = "color:#1D3557; font-weight:600;"),
+                             choices = c("Percentile Rank" = "rank", "Raw Score" = "raw"),
+                             selected = "rank")
           )
         ),
         
@@ -344,15 +360,10 @@ ui <- fluidPage(
                              label = tags$span("Factor", style = "color:#1D3557; font-weight:600;"),
                              choices = NULL)
           ),
-          column(3,
+          column(4,
                  selectInput("indicator",
                              label = tags$span("Indicator", style = "color:#1D3557; font-weight:600;"),
                              choices = NULL)
-          ),
-          column(2,
-                 selectInput("metric",
-                             label = tags$span("Metric", style = "color:#1D3557; font-weight:600;"),
-                             choices = c("Normalized (0\u20131)" = "norm", "Raw value" = "raw"))
           )
         )
       )
@@ -366,19 +377,41 @@ ui <- fluidPage(
                actionButton("clear_filters", "Clear", class = "btn-default btn-sm",
                             style = "margin-top:4px;")
         ),
-        column(3,
+        column(2,
                selectInput("filter_region", label = tags$span("Region",
                                                               style = "color:#1D3557; font-weight:600;"),
                            choices = c("All Regions" = "", all_regions),
                            selected = "")
         ),
-        column(4,
+        column(2,
                selectInput("filter_state", label = tags$span("State",
                                                              style = "color:#1D3557; font-weight:600;"),
                            choices = c("All States" = "", all_states),
                            selected = "")
         ),
-        column(4,
+        column(2,
+               selectizeInput("filter_park",
+                              label = tags$span("Park Unit",
+                                                style = "color:#1D3557; font-weight:600;"),
+                              choices = c("All Parks" = "", all_parks),
+                              selected = NULL,
+                              multiple = TRUE,
+                              options = list(placeholder = "Search parks...",
+                                             plugins = list("remove_button")))
+        ),
+        column(2,
+               br(),
+               div(style = "margin-top:4px;",
+                   materialSwitch(
+                     inputId = "filter_priority",
+                     label   = tags$span("Top Priority Only",
+                                         style = "color:#1D3557; font-weight:600; font-size:0.9rem;"),
+                     value   = FALSE,
+                     status  = "danger"
+                   )
+               )
+        ),
+        column(2,
                br(),
                uiOutput("filter_info")
         )
@@ -401,34 +434,34 @@ ui <- fluidPage(
   ),
   
   # ── Charts row ──
-  fluidRow(
-    column(6,
-           div(class = "section-panel", style = "min-height:440px;",
-               h4(icon("chart-bar"), " Regional Score Breakdown",
-                  style = "font-size:1.3rem;"),
-               p(style = "font-size:1rem; color:#666;",
-                 "Mean factor scores for the currently filtered water supplies."),
-               plotlyOutput("factor_chart", height = "350px")
-           )
-    ),
-    column(6,
-           div(class = "section-panel", style = "min-height:440px;",
-               h4(icon("map-marker-alt"), " Individual Water Supply Breakdown",
-                  style = "font-size:1.3rem;"),
-               conditionalPanel(
-                 condition = "output.site_selected == false",
-                 div(style = "text-align:center; padding:80px 20px; color:#999;",
-                     icon("mouse-pointer", style = "font-size:2rem; margin-bottom:10px;"),
-                     p(style = "font-size:1.05rem;",
-                       "Click on an individual water supply on the map to see its score breakdown."))
-               ),
-               conditionalPanel(
-                 condition = "output.site_selected == true",
-                 plotlyOutput("site_chart", height = "350px")
-               )
-           )
-    )
-  ),
+  # fluidRow(
+  #   column(6,
+  #          div(class = "section-panel", style = "min-height:440px;",
+  #              h4(icon("chart-bar"), " Regional Score Breakdown",
+  #                 style = "font-size:1.3rem;"),
+  #              p(style = "font-size:1rem; color:#666;",
+  #                "Mean factor scores for the currently filtered water supplies."),
+  #              plotlyOutput("factor_chart", height = "350px")
+  #          )
+  #   ),
+    # column(6,
+    #        div(class = "section-panel", style = "min-height:440px;",
+    #            h4(icon("map-marker-alt"), " Individual Water Supply Breakdown",
+    #               style = "font-size:1.3rem;"),
+    #            conditionalPanel(
+    #              condition = "output.site_selected == false",
+    #              div(style = "text-align:center; padding:80px 20px; color:#999;",
+    #                  icon("mouse-pointer", style = "font-size:2rem; margin-bottom:10px;"),
+    #                  p(style = "font-size:1.05rem;",
+    #                    "Click on an individual water supply on the map to see its score breakdown."))
+    #            ),
+    #            conditionalPanel(
+    #              condition = "output.site_selected == true",
+    #              plotlyOutput("site_chart", height = "350px")
+    #            )
+    #        )
+    # )
+  # ),
   
   # ── Data table row ──
   fluidRow(
@@ -475,22 +508,43 @@ server <- function(input, output, session) {
   observeEvent(input$clear_filters, {
     updateSelectInput(session, "filter_region", selected = "")
     updateSelectInput(session, "filter_state",  selected = "")
+    updateSelectizeInput(session, "filter_park", selected = character(0))
   })
   
-  # ── State filter cascades from region ──────────────────────────────────
+  # ── State and Park filters cascade from region/state ─────────────────
   observe({
+    df <- as.data.frame(combined_data)
     if (input$filter_region != "") {
-      states_in_region <- combined_data %>%
-        as.data.frame() %>%
-        filter(region == input$filter_region) %>%
-        pull(state) %>% na.omit() %>% unique() %>% sort()
-      updateSelectInput(session, "filter_state",
-                        choices = c("All States" = "", states_in_region),
-                        selected = "")
+      df <- df %>% filter(region == input$filter_region)
+    }
+    
+    states_avail <- sort(unique(na.omit(df$state)))
+    updateSelectInput(session, "filter_state",
+                      choices = c("All States" = "", states_avail),
+                      selected = input$filter_state)
+  })
+  
+  observe({
+    df <- as.data.frame(combined_data)
+    if (input$filter_region != "") {
+      df <- df %>% filter(region == input$filter_region)
+    }
+    if (input$filter_state != "") {
+      df <- df %>% filter(state == input$filter_state)
+    }
+    
+    parks_avail <- sort(unique(na.omit(df$park_unit)))
+    current_sel <- intersect(input$filter_park, parks_avail)
+    
+    # If any selected parks are no longer valid, clear them immediately
+    if (!setequal(current_sel, input$filter_park)) {
+      updateSelectizeInput(session, "filter_park",
+                           choices = c("All Parks" = "", parks_avail),
+                           selected = character(0))
     } else {
-      updateSelectInput(session, "filter_state",
-                        choices = c("All States" = "", all_states),
-                        selected = "")
+      updateSelectizeInput(session, "filter_park",
+                           choices = c("All Parks" = "", parks_avail),
+                           selected = current_sel)
     }
   })
   
@@ -502,15 +556,19 @@ server <- function(input, output, session) {
     
     if (input$filter_region != "") df <- df %>% filter(region == input$filter_region)
     if (input$filter_state  != "") df <- df %>% filter(state  == input$filter_state)
+    if (length(input$filter_park) > 0) df <- df %>% filter(park_unit %in% input$filter_park)
     
-    # Recalculate only when a filter is active
-    if (input$filter_region != "" || input$filter_state != "") {
-      df_recalc <- recalc_vuln(df)
-      # Patch recalculated scores back into the sf object
-      df$EXPOSURE      <- df_recalc$EXPOSURE
-      df$SENSITIVITY   <- df_recalc$SENSITIVITY
-      df$VULNERABILITY <- df_recalc$VULNERABILITY
+    has_filter <- input$filter_region != "" || input$filter_state != "" || length(input$filter_park) > 0
+    
+    # Recalculate scores within the filtered subset (requires enough rows for cut())
+    if (has_filter && nrow(df) >= 10) {
+      geom <- st_geometry(df)
+      df_recalc <- calc_vulnerability_index(as.data.frame(df))
+      df <- st_sf(df_recalc, geometry = geom)
     }
+    
+    # Apply priority filter AFTER recalculation so it reflects updated rankings
+    if (isTRUE(input$filter_priority)) df <- df %>% filter(priority_national == TRUE)
     
     df
   })
@@ -519,7 +577,8 @@ server <- function(input, output, session) {
   output$filter_info <- renderUI({
     n   <- nrow(filtered_data())
     tot <- nrow(combined_data)
-    if (input$filter_region == "" && input$filter_state == "") {
+    has_filter <- input$filter_region != "" || input$filter_state != "" || length(input$filter_park) > 0
+    if (!has_filter) {
       p(style = "color:#666; font-size:1.1rem; margin-top:8px;",
         paste0("Showing all ", tot, " water supplies"))
     } else {
@@ -535,20 +594,18 @@ server <- function(input, output, session) {
   # ── Active column ───────────────────────────────────────────────────────
   active_column <- reactive({
     if (input$view_mode == "score") {
-      col <- score_views[[input$score_view]]
+      base_col <- score_views[[input$score_view]]
+      if (isTRUE(input$score_metric == "rank")) {
+        score_rank_cols[[base_col]]
+      } else {
+        base_col
+      }
     } else {
-      req(input$component, input$factor, input$indicator, input$metric)
+      req(input$component, input$factor, input$indicator)
       cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
       req(!is.null(cfg))
-      col <- if (input$metric == "raw") cfg$raw_col else cfg$col
+      cfg$raw_col
     }
-    if (is.null(col) || nchar(col) == 0) return(NULL)
-    if (!col %in% names(combined_data)) {
-      showNotification(paste0("Column '", col, "' not found. Check final_index.csv."),
-                       type = "warning", duration = 5)
-      return(NULL)
-    }
-    col
   })
   
   # ── Map title ───────────────────────────────────────────────────────────
@@ -660,22 +717,32 @@ server <- function(input, output, session) {
     plot_data <- filtered_data()
     req(col %in% names(plot_data))
     
-    is_raw  <- (input$view_mode == "indicator" && isTRUE(input$metric == "raw"))
     vals    <- as.data.frame(plot_data)[[col]]
     val_rng <- range(vals, na.rm = TRUE)
-    pal_dom <- if (is_raw) val_rng else c(0, 1)
     
-    pal <- colorNumeric(c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226"),
-                        domain = pal_dom, na.color = "lightgrey")
+    # Determine palette domain
+    is_rank <- (input$view_mode == "score" && isTRUE(input$score_metric == "rank"))
+    pal_dom <- if (is_rank) c(0, 100) else val_rng
     
-    legend_title <- if (input$view_mode == "score") {
-      str_wrap(input$score_view, 20)
+    # Columns where lower raw values = higher vulnerability (invert color scale)
+    invert_raw_cols <- c("exp_runoff_change", "exp_precip_change", "exp_swe_change",
+                         "sen_runoff_trend", "sen_precip_trend", "sen_swe_trend")
+    is_inverted <- (input$view_mode == "indicator") && col %in% invert_raw_cols
+    
+    pal_colors <- if (is_inverted) {
+      rev(c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226"))
     } else {
-      paste0(str_wrap(input$indicator, 20), "\n",
-             if (is_raw) "Raw value" else "Normalized (0\u20131)")
+      c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226")
     }
     
-    legend_vals <- if (is_raw) c(val_rng, NA) else c(0, 1, NA)
+    pal <- colorNumeric(pal_colors, domain = pal_dom, na.color = "lightgrey")
+    
+    legend_title <- if (input$view_mode == "score") {
+      suffix <- if (is_rank) "\n(Percentile Rank)" else "\n(Raw Score)"
+      paste0(str_wrap(input$score_view, 20), suffix)
+    } else {
+      str_wrap(input$indicator, 20)
+    }
     
     # Pre-compute indicator config lookups
     is_ind <- input$view_mode == "indicator"
@@ -683,44 +750,45 @@ server <- function(input, output, session) {
       req(input$component, input$factor, input$indicator)
       ind_cfg       <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
       req(!is.null(ind_cfg))
-      popup_metric  <- input$metric
       popup_score   <- NA_character_
       popup_comp    <- input$component
       popup_fac     <- input$factor
       popup_ind     <- input$indicator
       popup_rawlbl  <- ind_cfg$raw_label
-      norm_col      <- ind_cfg$col
       raw_col_name  <- ind_cfg$raw_col
     } else {
-      popup_metric  <- "norm"
       popup_score   <- input$score_view
       popup_comp    <- NA_character_
       popup_fac     <- NA_character_
       popup_ind     <- NA_character_
       popup_rawlbl  <- NA_character_
-      norm_col      <- NULL
       raw_col_name  <- NULL
     }
     
     df        <- as.data.frame(plot_data)
     plot_vals <- df[[col]]
-    norm_vals <- if (is_ind && !is.null(norm_col))    df[[norm_col]]    else rep(NA_real_, nrow(df))
     raw_vals  <- if (is_ind && !is.null(raw_col_name)) df[[raw_col_name]] else rep(NA_real_, nrow(df))
     
-    radius_vec <- ifelse(is.na(plot_vals), 3,
-                         pmax(4, pmin(16, scales::rescale(plot_vals, to=c(4,16), from=pal_dom))))
+    radius_vec <- if (is_inverted) {
+      ifelse(is.na(plot_vals), 3,
+             pmax(4, pmin(16, scales::rescale(plot_vals, to=c(16,4), from=pal_dom))))
+    } else {
+      ifelse(is.na(plot_vals), 3,
+             pmax(4, pmin(16, scales::rescale(plot_vals, to=c(4,16), from=pal_dom))))
+    }
     fill_vec   <- pal(plot_vals)
     
     popup_vec <- unlist(Map(
       create_popup,
-      norm_value = norm_vals, raw_value = raw_vals, col_value = plot_vals,
-      vuln = df[["VULNERABILITY"]], exposure = df[["EXPOSURE"]], sensitivity = df[["SENSITIVITY"]],
+      raw_value = raw_vals, col_value = plot_vals,
+      vuln_rank = df[["VULNERABILITY_rank"]],
+      exp_rank = df[["EXPOSURE_rank"]], sen_rank = df[["SENSITIVITY_rank"]],
       priority = df[["priority_national"]], flag_fire = df[["flag_fire"]],
       flag_flood = df[["flag_flood"]], flag_slr = df[["flag_slr"]], flag_drought = df[["flag_drought"]],
       wsd_source_id = df[["wsd_source_id"]], park_unit = df[["park_unit"]],
       park_name = df[["park_name"]], water_system_name = df[["water_system_name"]],
       state = df[["state"]],
-      MoreArgs = list(view_mode = input$view_mode, metric = popup_metric,
+      MoreArgs = list(view_mode = input$view_mode,
                       score_label = popup_score, component = popup_comp,
                       factor_name = popup_fac, indicator_name = popup_ind,
                       raw_label = popup_rawlbl)
@@ -738,69 +806,57 @@ server <- function(input, output, session) {
   })
   
   # ── Factor score breakdown chart ────────────────────────────────────────
-  output$factor_chart <- renderPlotly({
-    df      <- as.data.frame(filtered_data())
-    fac_cols <- names(factor_labels)
-    fac_cols <- fac_cols[fac_cols %in% names(df)]
-    
-    means <- colMeans(df[, fac_cols, drop = FALSE], na.rm = TRUE)
-    bar_order <- factor_labels[fac_cols]
-    chart_df <- data.frame(
-      factor = factor(bar_order, levels = bar_order),
-      mean   = round(means, 3),
-      component = ifelse(grepl("Exp", bar_order), "Exposure", "Sensitivity")
-    )
-    
-    colors <- ifelse(chart_df$component == "Exposure", "#457B9D", "#C05235")
-    
-    plot_ly(chart_df, x = ~factor, y = ~mean, type = "bar",
-            marker = list(color = colors),
-            hovertemplate = "%{x}<br>Mean score: %{y:.3f}<extra></extra>") %>%
-      layout(
-        xaxis = list(title = "", tickfont = list(size = 10),
-                     categoryorder = "array", categoryarray = bar_order),
-        yaxis = list(title = "Mean Score (0-1)", range = c(0, 1),
-                     tickfont = list(size = 10)),
-        margin = list(t = 35, b = 60),
-        showlegend = FALSE,
-        plot_bgcolor  = "white",
-        paper_bgcolor = "white"
-      )
-  })
+  # output$factor_chart <- renderPlotly({
+  #   df      <- as.data.frame(filtered_data())
+  #   fac_cols <- names(factor_labels)
+  #   fac_cols <- fac_cols[fac_cols %in% names(df)]
+  #   
+  #   means <- colMeans(df[, fac_cols, drop = FALSE], na.rm = TRUE)
+  #   bar_order <- factor_labels[fac_cols]
+  #   chart_df <- data.frame(
+  #     factor = factor(bar_order, levels = bar_order),
+  #     mean   = round(means, 3),
+  #     component = ifelse(grepl("Exp", bar_order), "Exposure", "Sensitivity")
+  #   )
+  #   
+  #   colors <- ifelse(chart_df$component == "Exposure", "#457B9D", "#C05235")
+  #   
+  #   plot_ly(chart_df, x = ~factor, y = ~mean, type = "bar",
+  #           marker = list(color = colors),
+  #           hovertemplate = "%{x}<br>Mean score: %{y:.3f}<extra></extra>") %>%
+  #     layout(
+  #       xaxis = list(title = "", tickfont = list(size = 10),
+  #                    categoryorder = "array", categoryarray = bar_order),
+  #       yaxis = list(title = "Mean Score (0-1)", range = c(0, 1),
+  #                    tickfont = list(size = 10)),
+  #       margin = list(t = 35, b = 60),
+  #       showlegend = FALSE,
+  #       plot_bgcolor  = "white",
+  #       paper_bgcolor = "white"
+  #     )
+  # })
+  # 
   
-  # ── Clicked site reactive ───────────────────────────────────────────────
+  # ── Marker click → modal with site chart ────────────────────────────────
   clicked_site <- reactiveVal(NULL)
+  
   
   observeEvent(input$map_marker_click, {
     click <- input$map_marker_click
-    if (!is.null(click$id)) {
-      clicked_site(click$id)
-    }
-  })
-  
-  # ── Site selected flag for conditionalPanel ──────────────────────────────
-  output$site_selected <- reactive({ !is.null(clicked_site()) })
-  outputOptions(output, "site_selected", suspendWhenHidden = FALSE)
-  
-  # ── Individual site score breakdown chart ───────────────────────────────
-  output$site_chart <- renderPlotly({
-    req(clicked_site())
+    req(!is.null(click$id))
+    clicked_site(click$id)
     
     df_all  <- as.data.frame(filtered_data())
-    site_id <- clicked_site()
+    site_id <- click$id
     req(site_id %in% df_all$wsd_source_id)
     
     site_row <- df_all[df_all$wsd_source_id == site_id, ]
+    fac_cols <- names(factor_labels)[names(factor_labels) %in% names(df_all)]
     
-    fac_cols <- names(factor_labels)
-    fac_cols <- fac_cols[fac_cols %in% names(df_all)]
-    
-    # Regional means
-    means <- colMeans(df_all[, fac_cols, drop = FALSE], na.rm = TRUE)
-    # Site values
+    means     <- colMeans(df_all[, fac_cols, drop = FALSE], na.rm = TRUE)
     site_vals <- as.numeric(site_row[1, fac_cols])
-    
     bar_order <- factor_labels[fac_cols]
+    
     chart_df <- data.frame(
       factor    = factor(bar_order, levels = bar_order),
       regional  = round(means, 3),
@@ -810,43 +866,116 @@ server <- function(input, output, session) {
     
     site_title <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
     
-    plot_ly(chart_df, x = ~factor) %>%
+    p <- plot_ly(chart_df, x = ~factor) %>%
       add_bars(y = ~regional, name = "Regional Mean",
                marker = list(color = "rgba(180,180,180,0.5)"),
                hovertemplate = "%{x}<br>Regional mean: %{y:.3f}<extra></extra>") %>%
       add_bars(y = ~site, name = "Selected Site",
-               marker = list(color = ifelse(chart_df$component == "Exposure",
-                                            "#457B9D", "#C05235")),
-               showlegend = FALSE,
+               marker = list(color = ifelse(chart_df$component == "Exposure", "#457B9D", "#C05235")),
                hovertemplate = "%{x}<br>Site score: %{y:.3f}<extra></extra>") %>%
       layout(
         barmode = "group",
-        title = list(text = site_title, font = list(size = 13, color = "#1D3557"),
-                     x = 0, xanchor = "left"),
-        xaxis = list(title = "", tickfont = list(size = 10),
-                     categoryorder = "array", categoryarray = bar_order),
-        yaxis = list(title = "Score (0-1)", range = c(0, 1),
-                     tickfont = list(size = 10)),
-        margin = list(t = 35, b = 60),
-        legend = list(orientation = "h", y = -0.25),
+        title   = list(text = site_title, font = list(size = 13, color = "#1D3557"),
+                       x = 0, xanchor = "left"),
+        xaxis   = list(title = "", tickfont = list(size = 10),
+                       categoryorder = "array", categoryarray = bar_order),
+        yaxis   = list(title = "Score (0-1)", range = c(0, 1), tickfont = list(size = 10)),
+        margin  = list(t = 35, b = 60),
+        legend  = list(orientation = "h", y = -0.25),
         plot_bgcolor  = "white",
         paper_bgcolor = "white"
       )
+    
+    showModal(modalDialog(
+      title = NULL,
+      renderPlotly(p),
+      size   = "l",
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
   })
+  
+  # # ── Clicked site reactive ───────────────────────────────────────────────
+  # clicked_site <- reactiveVal(NULL)
+  # 
+  # observeEvent(input$map_marker_click, {
+  #   click <- input$map_marker_click
+  #   if (!is.null(click$id)) {
+  #     clicked_site(click$id)
+  #   }
+  # })
+  # 
+  # # ── Site selected flag for conditionalPanel ──────────────────────────────
+  # output$site_selected <- reactive({ !is.null(clicked_site()) })
+  # outputOptions(output, "site_selected", suspendWhenHidden = FALSE)
+  # 
+  # # ── Individual site score breakdown chart ───────────────────────────────
+  # output$site_chart <- renderPlotly({
+  #   req(clicked_site())
+  #   
+  #   df_all  <- as.data.frame(filtered_data())
+  #   site_id <- clicked_site()
+  #   req(site_id %in% df_all$wsd_source_id)
+  #   
+  #   site_row <- df_all[df_all$wsd_source_id == site_id, ]
+  #   
+  #   fac_cols <- names(factor_labels)
+  #   fac_cols <- fac_cols[fac_cols %in% names(df_all)]
+  #   
+  #   # Regional means
+  #   means <- colMeans(df_all[, fac_cols, drop = FALSE], na.rm = TRUE)
+  #   # Site values
+  #   site_vals <- as.numeric(site_row[1, fac_cols])
+  #   
+  #   bar_order <- factor_labels[fac_cols]
+  #   chart_df <- data.frame(
+  #     factor    = factor(bar_order, levels = bar_order),
+  #     regional  = round(means, 3),
+  #     site      = round(site_vals, 3),
+  #     component = ifelse(grepl("Exp", bar_order), "Exposure", "Sensitivity")
+  #   )
+  #   
+  #   site_title <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
+  #   
+  #   plot_ly(chart_df, x = ~factor) %>%
+  #     add_bars(y = ~regional, name = "Regional Mean",
+  #              marker = list(color = "rgba(180,180,180,0.5)"),
+  #              hovertemplate = "%{x}<br>Regional mean: %{y:.3f}<extra></extra>") %>%
+  #     add_bars(y = ~site, name = "Selected Site",
+  #              marker = list(color = ifelse(chart_df$component == "Exposure",
+  #                                           "#457B9D", "#C05235")),
+  #              showlegend = FALSE,
+  #              hovertemplate = "%{x}<br>Site score: %{y:.3f}<extra></extra>") %>%
+  #     layout(
+  #       barmode = "group",
+  #       title = list(text = site_title, font = list(size = 13, color = "#1D3557"),
+  #                    x = 0, xanchor = "left"),
+  #       xaxis = list(title = "", tickfont = list(size = 10),
+  #                    categoryorder = "array", categoryarray = bar_order),
+  #       yaxis = list(title = "Score (0-1)", range = c(0, 1),
+  #                    tickfont = list(size = 10)),
+  #       margin = list(t = 35, b = 60),
+  #       legend = list(orientation = "h", y = -0.25),
+  #       plot_bgcolor  = "white",
+  #       paper_bgcolor = "white"
+  #     )
+  # })
   
   # ── Data table ──────────────────────────────────────────────────────────
   output$data_table <- renderDT(server = FALSE, {
     df <- as.data.frame(filtered_data()) %>%
       select(wsd_source_id, park_unit, park_name, state, region,
              water_system_name,
-             VULNERABILITY, EXPOSURE, SENSITIVITY,
+             VULNERABILITY, vulnerability_quartile, EXPOSURE, SENSITIVITY,
              priority_national, flag_fire, flag_flood, flag_slr, flag_drought) %>%
       mutate(across(c(VULNERABILITY, EXPOSURE, SENSITIVITY), ~round(., 3)),
              across(c(priority_national, flag_fire, flag_flood, flag_slr, flag_drought),
                     ~ifelse(., "\u2713", "")))
     
+    vuln_max <- max(df$VULNERABILITY, na.rm = TRUE)
+    
     names(df) <- c("WSD ID", "Park Unit", "Park Name", "State", "Region",
-                   "Water System", "Vulnerability", "Exposure", "Sensitivity",
+                   "Water System", "Vulnerability", "Quartile", "Exposure", "Sensitivity",
                    "Priority", "Fire", "Flood", "SLR", "Drought")
     
     datatable(df,
@@ -862,10 +991,10 @@ server <- function(input, output, session) {
                 buttons    = list("csv", "excel"),
                 scrollX    = TRUE,
                 columnDefs = list(list(className = "dt-center",
-                                       targets = 6:13))
+                                       targets = 6:14))
               )) %>%
       formatStyle("Vulnerability",
-                  background = styleColorBar(c(0,1), "#C05235"),
+                  background = styleColorBar(c(0, vuln_max), "#C05235"),
                   backgroundSize = "100% 80%",
                   backgroundRepeat = "no-repeat",
                   backgroundPosition = "center") %>%
@@ -875,30 +1004,26 @@ server <- function(input, output, session) {
   })
   
   # ── Popup builder ───────────────────────────────────────────────────────
-  create_popup <- function(view_mode, metric, score_label, component, factor_name,
-                           indicator_name, norm_value, raw_value, raw_label, col_value,
-                           vuln, exposure, sensitivity,
+  create_popup <- function(view_mode, score_label, component, factor_name,
+                           indicator_name, raw_value, raw_label, col_value,
+                           vuln_rank, exp_rank, sen_rank,
                            priority, flag_fire, flag_flood, flag_slr, flag_drought,
                            wsd_source_id, park_unit, park_name, water_system_name, state) {
     
     top_section <- if (view_mode == "score") {
       paste0("<b style='color:#386150; font-size:14px;'>", score_label, "</b><br>",
-             "<b>Value (0\u20131):</b> <span style='font-size:14px; font-weight:bold;'>",
+             "<b>Value:</b> <span style='font-size:14px; font-weight:bold;'>",
              round(col_value, 3), "</span>")
     } else {
       raw_row <- if (!is.na(raw_value)) {
         paste0("<b>", raw_label, ":</b> <span style='font-size:13px; font-weight:bold;'>",
-               round(raw_value, 3), "</span><br>")
+               round(raw_value, 3), "</span>")
       } else {
-        paste0("<b>", raw_label, ":</b> <span style='color:#999;'>No data</span><br>")
+        paste0("<b>", raw_label, ":</b> <span style='color:#999;'>No data</span>")
       }
-      norm_row <- paste0(
-        "<b>Normalized (0\u20131):</b> <span style='font-size:13px; font-weight:bold;'>",
-        if (!is.na(norm_value)) round(norm_value, 3) else "<span style='color:#999;'>No data</span>",
-        "</span>")
       paste0("<b style='color:#1D3557; font-size:14px;'>", indicator_name, "</b><br>",
              "<span style='font-size:11px; color:#666;'>", component, " \u203a ", factor_name,
-             "</span><br>", raw_row, norm_row)
+             "</span><br>", raw_row)
     }
     
     score_section <- paste0(
@@ -906,10 +1031,11 @@ server <- function(input, output, session) {
       "<table style='font-size:11px; width:100%;'><tr>",
       "<td><b>Vulnerability</b></td><td><b>Exposure</b></td><td><b>Sensitivity</b></td>",
       "</tr><tr>",
-      "<td style='color:#386150; font-weight:bold;'>", round(vuln, 3), "</td>",
-      "<td style='color:#457B9D; font-weight:bold;'>", round(exposure, 3), "</td>",
-      "<td style='color:#C05235; font-weight:bold;'>", round(sensitivity, 3), "</td>",
-      "</tr></table>")
+      "<td style='color:#386150; font-weight:bold;'>", round(vuln_rank, 1), "%</td>",
+      "<td style='color:#457B9D; font-weight:bold;'>", round(exp_rank, 1), "%</td>",
+      "<td style='color:#C05235; font-weight:bold;'>", round(sen_rank, 1), "%</td>",
+      "</tr></table>",
+      "<span style='font-size:9px; color:#999;'>Percentile rank (higher = more vulnerable)</span>")
     
     flags <- c(
       if (isTRUE(priority))    "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>HIGH PRIORITY</span>" else NULL,
