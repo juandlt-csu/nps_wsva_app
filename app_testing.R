@@ -3,6 +3,7 @@ library(leaflet)
 library(leaflegend)
 library(htmlwidgets)
 library(shinyWidgets)
+library(shinyjs)
 library(sf)
 library(dplyr)
 library(readr)
@@ -212,6 +213,7 @@ factor_labels <- c(
 
 ui <- fluidPage(
   tags$head(
+    useShinyjs(),
     tags$style(HTML("
       body { background-color: #EDF4F7; font-family: 'Arial','Helvetica',sans-serif; }
 
@@ -306,14 +308,75 @@ ui <- fluidPage(
             and <strong style='color:#C05235;'>Sensitivity</strong> (current susceptibility) &mdash;
             which combine into an overall <strong style='color:#386150;'>Vulnerability Score</strong>.
             Larger, darker circles indicate higher vulnerability.")),
+                       div(style = "background:white; border-radius:8px; padding:14px 18px; margin:10px 0 6px 0;
+             border:1px solid #dce8ef;",
+                           p(style = "font-size:1.05rem; color:#555; margin-bottom:10px;",
+                             HTML("Scores are computed in three steps using a Euclidean distance framework:")),
+                           
+                           # Step diagram
+                           div(style = "display:flex; align-items:center; justify-content:center;
+                 flex-wrap:wrap; gap:6px; margin-bottom:12px; text-align:center;",
+                               div(style = "background:#f5f8fa; border:1px solid #dce8ef; border-radius:6px; padding:8px 12px;",
+                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 1"),
+                                   HTML("<b>Indicators</b> (0&ndash;1)<br>
+                 <span style='font-size:0.85rem; color:#555;'>normalized raw values</span>")),
+                               div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
+                               div(style = "background:#f5f8fa; border:1px solid #dce8ef; border-radius:6px; padding:8px 12px;",
+                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 2"),
+                                   HTML("<b>Factors</b><br>
+                 <span style='font-size:0.85rem; color:#555;'>
+                 &radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; indicator<sup>2</sup>&thinsp;</span>
+                 </span><br>
+                 <span style='font-size:0.78rem; color:#888; font-style:italic;'>
+                 then normalized to 0&ndash;1</span>")),
+                               div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
+                               div(style = "background:#edf3f8; border:1px solid #c1d5e0; border-radius:6px; padding:8px 12px;",
+                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 3"),
+                                   HTML("<b style='color:#457B9D;'>Exposure</b> &amp;
+                 <b style='color:#C05235;'>Sensitivity</b><br>
+                 <span style='font-size:0.85rem; color:#555;'>
+                 &radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; factor<sup>2</sup>&thinsp;</span>
+                 </span>")),
+                               div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
+                               div(style = "background:#e8f0e9; border:1px solid #b2ccb5; border-radius:6px; padding:8px 12px;",
+                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 4"),
+                                   HTML("<b style='color:#386150;'>Vulnerability</b><br>
+                 <span style='font-size:0.85rem; color:#555;'>
+                 &radic;<span style='text-decoration:overline;'>&thinsp;Exp<sup>2</sup> + Sen<sup>2</sup>&thinsp;</span>
+                 </span>"))
+                           ),
+                           
+                           # Ranking explanation
+                           tags$hr(style = "border-color:#dce8ef; margin:8px 0;"),
+                           p(style = "font-size:0.95rem; color:#555; margin-bottom:6px;",
+                             HTML("<b>Percentile ranks</b> and <b>High Priority</b> flags (shown in popups and the data table)
+           indicate where a water supply falls relative to others in the <b>current view</b> &mdash;
+           a rank of <b>90</b> means the supply scores higher than 90% of the comparison group.
+           Both are recalculated whenever a region, state, or park filter is applied, so
+           a supply flagged as High Priority within a filtered view may not hold that designation
+           nationally.")),
+                           
+                           # Subjectivity caveat
+                           div(style = "background:#fff8e6; border-left:3px solid #8B6914; border-radius:4px;
+                 padding:8px 12px; margin-top:6px;",
+                               p(style = "font-size:0.9rem; color:#5a4a1a; margin:0;",
+                                 HTML("<b>&#x26A0;&#xFE0F; Scores are relative, not absolute.</b>
+               A score only has meaning within the group it is compared against.
+               The same water supply may rank differently depending on whether it is evaluated
+               across CONUS, a region, a state, or a subset of parks. Use filters
+               intentionally to ensure comparisons are meaningful.")))
+                       ),
                        div(class = "info-section-title", icon("sliders-h"), " Navigation"),
                        p(HTML("Use <em>Score View</em> to map composite or factor-level scores, or switch to
             <em>Specific Indicator</em> to drill into individual metrics:
             <strong>Component &rarr; Factor &rarr; Indicator</strong>.
             Filter by region or state to recalculate scores relative to that subset.")),
                        div(class = "info-section-title", icon("exclamation-triangle"), " Priority & Hazard Flags"),
-                       p(HTML("Water supplies in the <strong>top 25% nationally</strong> for overall vulnerability
-            are flagged as <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
+                       p(HTML("Water supplies in the <strong>top 25% of the current comparison group</strong>
+            for overall vulnerability are flagged as
+            <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
+            This threshold is recalculated relative to the active filter (CONUS, region, state, or park subset),
+            so priority designations reflect the selected comparison group, not a fixed national threshold.
             Popups also display hazard-specific flags when a supply scores in the top percentiles for
             individual threats:
             <span class='badge-demo' style='background:#C05235;'>&#x1F525; Fire</span>
@@ -558,12 +621,18 @@ server <- function(input, output, session) {
     if (input$filter_state  != "") df <- df %>% filter(state  == input$filter_state)
     if (length(input$filter_park) > 0) df <- df %>% filter(park_unit %in% input$filter_park)
     
-    has_filter <- input$filter_region != "" || input$filter_state != "" || length(input$filter_park) > 0
+    has_geo_filter <- input$filter_region != "" || input$filter_state != ""
     
-    # Recalculate scores within the filtered subset (requires enough rows for cut())
-    if (has_filter && nrow(df) >= 10) {
+    # Recalculate scores only for region/state filters, not park-level selections
+    if (has_geo_filter && nrow(df) >= 20) {
       geom <- st_geometry(df)
-      df_recalc <- calc_vulnerability_index(as.data.frame(df))
+      df_recalc <- tryCatch(
+        calc_vulnerability_index(as.data.frame(df)),
+        error = function(e) {
+          message("Score recalculation failed (subset too small or low variance): ", e$message)
+          as.data.frame(df)
+        }
+      )
       df <- st_sf(df_recalc, geometry = geom)
     }
     
@@ -573,20 +642,56 @@ server <- function(input, output, session) {
     df
   })
   
+  # ── Zoom to filtered extent ──────────────────────────────────────────────
+  observeEvent(filtered_data(), {
+    df <- filtered_data()
+    req(nrow(df) > 0)
+    
+    bbox <- st_bbox(df)
+    
+    leafletProxy("map") %>%
+      flyToBounds(
+        lng1 = bbox[["xmin"]], lat1 = bbox[["ymin"]],
+        lng2 = bbox[["xmax"]], lat2 = bbox[["ymax"]],
+        options = list(padding = c(40, 40))
+      )
+  }, ignoreInit = TRUE)
+  
   # ── Filter info badge ───────────────────────────────────────────────────
   output$filter_info <- renderUI({
     n   <- nrow(filtered_data())
     tot <- nrow(combined_data)
-    has_filter <- input$filter_region != "" || input$filter_state != "" || length(input$filter_park) > 0
-    if (!has_filter) {
-      p(style = "color:#666; font-size:1.1rem; margin-top:8px;",
-        paste0("Showing all ", tot, " water supplies"))
+    has_geo_filter  <- input$filter_region != "" || input$filter_state != ""
+    has_park_filter <- length(input$filter_park) > 0
+    
+    context_label <- if (input$filter_region != "" && input$filter_state != "") {
+      paste0(input$filter_state, " (", input$filter_region, ")")
+    } else if (input$filter_state != "") {
+      input$filter_state
+    } else if (input$filter_region != "") {
+      input$filter_region
+    } else {
+      "National"
+    }
+    
+    if (!has_geo_filter && !has_park_filter) {
+      tagList(
+        p(style = "color:#666; font-size:1.1rem; margin-top:8px;",
+          paste0("Showing all ", tot, " water supplies")),
+        tags$span(class = "filter-badge", style = "font-size:0.95rem; background:#386150;",
+                  "\U0001f30e Scores: National")
+      )
     } else {
       tagList(
         p(style = "color:#1D3557; font-weight:600; font-size:1.1rem; margin-top:8px;",
-          paste0("Showing ", n, " of ", tot, " water supplies"),
-          tags$br(),
-          tags$span(class = "filter-badge", style = "font-size:0.95rem;", "Scores recalculated within filter"))
+          paste0("Showing ", n, " of ", tot, " water supplies")),
+        tags$span(class = "filter-badge",
+                  style = paste0("font-size:0.95rem; background:",
+                                 if (has_geo_filter) "#386150;" else "#457B9D;"),
+                  if (has_geo_filter)
+                    paste0("\U0001f4ca Scores: ", context_label)
+                  else
+                    "\U0001f4ca Scores: National (park filter only)")
       )
     }
   })
@@ -717,8 +822,12 @@ server <- function(input, output, session) {
     plot_data <- filtered_data()
     req(col %in% names(plot_data))
     
-    vals    <- as.data.frame(plot_data)[[col]]
+    vals    <- as.numeric(as.data.frame(plot_data)[[col]])
+    vals    <- vals[is.finite(vals)]
+    req(length(vals) > 0)
     val_rng <- range(vals, na.rm = TRUE)
+    # Prevent zero-width domain which breaks colorNumeric
+    if (val_rng[1] == val_rng[2]) val_rng <- c(val_rng[1] - 0.001, val_rng[2] + 0.001)
     
     # Determine palette domain
     is_rank <- (input$view_mode == "score" && isTRUE(input$score_metric == "rank"))
@@ -799,6 +908,11 @@ server <- function(input, output, session) {
       addCircleMarkers(data = plot_data, radius = radius_vec, color = "#1D3557",
                        fillColor = fill_vec, fillOpacity = 0.9,
                        stroke = TRUE, weight = 1, popup = popup_vec,
+                       label = as.data.frame(plot_data)[["park_name"]],
+                       labelOptions = labelOptions(
+                         style = list("font-weight" = "normal", "font-size" = "12px"),
+                         textsize = "12px", direction = "auto"
+                       ),
                        layerId = as.data.frame(plot_data)[["wsd_source_id"]]) %>%
       addLegend(pal = pal, values = na.omit(vals), title = legend_title,
                 na.label = "No Data", position = "bottomright",
@@ -841,18 +955,21 @@ server <- function(input, output, session) {
   clicked_site <- reactiveVal(NULL)
   
   
+  # ── Marker click — just track the site ──────────────────────────────────
   observeEvent(input$map_marker_click, {
     click <- input$map_marker_click
     req(!is.null(click$id))
     clicked_site(click$id)
-    
+  })
+  
+  # ── Popup button → modal with site chart ────────────────────────────────
+  observeEvent(input$show_chart_btn, {
+    site_id <- input$show_chart_btn
     df_all  <- as.data.frame(filtered_data())
-    site_id <- click$id
     req(site_id %in% df_all$wsd_source_id)
     
-    site_row <- df_all[df_all$wsd_source_id == site_id, ]
-    fac_cols <- names(factor_labels)[names(factor_labels) %in% names(df_all)]
-    
+    site_row  <- df_all[df_all$wsd_source_id == site_id, ]
+    fac_cols  <- names(factor_labels)[names(factor_labels) %in% names(df_all)]
     means     <- colMeans(df_all[, fac_cols, drop = FALSE], na.rm = TRUE)
     site_vals <- as.numeric(site_row[1, fac_cols])
     bar_order <- factor_labels[fac_cols]
@@ -889,9 +1006,11 @@ server <- function(input, output, session) {
     showModal(modalDialog(
       title = NULL,
       renderPlotly(p),
-      size   = "l",
+      tags$p("\u24d8 Regional values representative of the currently filtered selection",
+             style = "font-size:11px; color:#888; margin-top:4px; margin-bottom:0;"),
+      size      = "l",
       easyClose = TRUE,
-      footer = modalButton("Close")
+      footer    = modalButton("Close")
     ))
   })
   
@@ -966,41 +1085,56 @@ server <- function(input, output, session) {
     df <- as.data.frame(filtered_data()) %>%
       select(wsd_source_id, park_unit, park_name, state, region,
              water_system_name,
-             VULNERABILITY, vulnerability_quartile, EXPOSURE, SENSITIVITY,
+             VULNERABILITY, VULNERABILITY_rank, EXPOSURE, EXPOSURE_rank,
+             SENSITIVITY, SENSITIVITY_rank,
+             vulnerability_quartile,
+             any_of(names(factor_labels)),
+             starts_with("norm_"),
+             starts_with("exp_"), starts_with("sen_"),
              priority_national, flag_fire, flag_flood, flag_slr, flag_drought) %>%
-      mutate(across(c(VULNERABILITY, EXPOSURE, SENSITIVITY), ~round(., 3)),
-             across(c(priority_national, flag_fire, flag_flood, flag_slr, flag_drought),
-                    ~ifelse(., "\u2713", "")))
+      mutate(
+        across(where(is.numeric), ~round(., 3)),
+        # Build combined priority flags column
+        priority_flags = paste0(
+          ifelse(!is.na(priority_national) & priority_national, "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>HIGH PRIORITY</span>", ""),
+          ifelse(!is.na(flag_fire)    & flag_fire,    "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F525; Fire</span>", ""),
+          ifelse(!is.na(flag_flood)   & flag_flood,   "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F4A7; Flood</span>", ""),
+          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F30A; SLR</span>", ""),
+          ifelse(!is.na(flag_drought) & flag_drought,  "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x2600;&#xFE0F; Drought</span>", "")
+        )
+      ) %>%
+      select(-priority_national, -flag_fire, -flag_flood, -flag_slr, -flag_drought)
     
-    vuln_max <- max(df$VULNERABILITY, na.rm = TRUE)
+    #vuln_max <- max(df$VULNERABILITY, na.rm = TRUE)
     
-    names(df) <- c("WSD ID", "Park Unit", "Park Name", "State", "Region",
-                   "Water System", "Vulnerability", "Quartile", "Exposure", "Sensitivity",
-                   "Priority", "Fire", "Flood", "SLR", "Drought")
+    # Move priority_flags to be right after the score columns, before indicator columns
+    df <- df %>%
+      relocate(priority_flags, .before = VULNERABILITY)
     
     datatable(df,
               selection  = "single",
               rownames   = FALSE,
+              escape     = FALSE,
               extensions = "Buttons",
               options    = list(
-                paging     = FALSE,
-                scrollY    = "400px",
+                paging         = FALSE,
+                scrollY        = "400px",
+                scrollX        = TRUE,
                 scrollCollapse = TRUE,
-                order      = list(list(6, "desc")),
-                dom        = "Bfrtip",
-                buttons    = list("csv", "excel"),
-                scrollX    = TRUE,
-                columnDefs = list(list(className = "dt-center",
-                                       targets = 6:14))
-              )) %>%
-      formatStyle("Vulnerability",
-                  background = styleColorBar(c(0, vuln_max), "#C05235"),
-                  backgroundSize = "100% 80%",
-                  backgroundRepeat = "no-repeat",
-                  backgroundPosition = "center") %>%
-      formatStyle("Priority", color = "#9B2226", fontWeight = "bold") %>%
-      formatStyle(c("Fire","Flood","SLR","Drought"),
-                  color = "#457B9D", fontWeight = "bold")
+                order          = list(list(which(names(df) == "VULNERABILITY") - 1, "desc")),                dom            = "Bfrtip",
+                buttons        = list("csv", "excel"),
+                columnDefs     = list(
+                  list(className = "dt-center", targets = "_all"),
+                  list(width = "120px", targets = 0:5),   # ID/name cols
+                  list(width = "80px",  targets = 6:12),  # score cols
+                  list(width = "300px", targets = 13)     # flags col
+                )
+              )) #%>% 
+      # formatStyle("VULNERABILITY",
+      #             background         = styleColorBar(c(0, vuln_max), "#C05235"),
+      #             backgroundSize     = "100% 80%",
+      #             backgroundRepeat   = "no-repeat",
+      #             backgroundPosition = "center")
   })
   
   # ── Popup builder ───────────────────────────────────────────────────────
@@ -1054,7 +1188,13 @@ server <- function(input, output, session) {
       "<b>Park Unit:</b> ",       park_unit,      "<br>",
       "<b>Park Name:</b> ",       park_name,      "<br>",
       "<b>Water System:</b> ",    water_system_name, "<br>",
-      "<b>State:</b> ",           state)
+      "<b>State:</b> ",           state,           "<br>",
+      "<hr style='margin:6px 0; border-color:#ddd;'>",
+      "<button onclick=\"Shiny.setInputValue('show_chart_btn', '", wsd_source_id,
+      "', {priority: 'event'});\" ",
+      "style='background:#1D3557;color:white;border:none;border-radius:4px;",
+      "padding:5px 10px;font-size:11px;cursor:pointer;width:100%;'>",
+      "&#x1F4CA; View Score Breakdown</button>")
     
     paste0("<div style='font-family:Arial; font-size:12px; min-width:210px;'>",
            top_section, score_section, flag_section, site_section, "</div>")
