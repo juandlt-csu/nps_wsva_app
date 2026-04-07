@@ -13,9 +13,9 @@ library(purrr)
 library(DT)
 library(plotly)
 library(later)
-library(promises)
-library(future)
-plan(multisession)
+# library(promises)
+# library(future)
+# plan(multisession)
 
 ############# DATA ############
 
@@ -26,7 +26,7 @@ source("calc_vulnerability_index.R")
 # for fast native Leaflet rendering
 # parks_raw <- st_read("rapid_app/app_data/park_boundaries_2025-08-14.gpkg", quiet = TRUE) %>%
 #   st_transform(crs = 4326) %>%
-#   st_simplify(preserveTopology = TRUE, dTolerance = 0.04) %>%
+#   st_simplify(preserveTopology = TRUE, dTolerance = 2) %>%
 #   select(UNIT_NAME)   # keep only the label column — much smaller object
 # write_sf(parks_raw, "rapid_app/app_data/parks_simplified.gpkg")
 park_boundaries <- st_read("app_data/parks_simplified.gpkg")
@@ -34,7 +34,8 @@ park_boundaries <- st_read("app_data/parks_simplified.gpkg")
 
 water_supplies <- read_csv("app_data/water_supplies.csv") %>%
   select(wsd_source_id, park_unit, park_name, region, state,
-         water_system_name, source_longitude, source_latitude)
+         water_system_name, system_type, description,
+         source_longitude, source_latitude)
 
 # Raw indicators — vulnerability scores are calculated on the fly
 final_indicators <- read_csv("app_data/final_indicators.csv")
@@ -223,11 +224,23 @@ ui <- fluidPage(
       body { background-color: #EDF4F7; font-family: 'Arial','Helvetica',sans-serif; }
 
       .main-header {
-        background: #1D3557;
-        color: white; padding: 25px 15px; margin-bottom: 15px;
-        border-radius: 10px; box-shadow: 0 4px 12px rgba(29,53,87,0.25);
-      }
-      .main-header h1 { margin:0; font-size:2.2rem; font-weight:300; text-align:center; }
+  background: #0d1f35;
+  color: white;
+  padding: 0;
+  margin-bottom: 15px;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(13,31,53,0.4);
+  overflow: hidden;
+}
+/* Top accent strip */
+.main-header-accent {
+  height: 5px;
+  background: linear-gradient(90deg, #1D3557 0%, #2a7f7f 40%, #A8DADC 70%, #2a7f7f 100%);
+}
+.main-header-body {
+  padding: 22px 20px 18px 20px;
+}
+.main-header h1 { margin:0; text-align:center; }
 
       .control-panel {
         background: white; padding: 15px 18px; border-radius: 10px;
@@ -246,11 +259,11 @@ ui <- fluidPage(
       .btn-default { border-color:#1D3557; color:#1D3557; }
       
       #clear_filters {
-      width: 100%; background-color: #C05235; color: white;
+      width: 100%; background-color: #2a7f7f; color: white;
       border: none; border-radius: 6px; font-weight: 600;
-      font-size: 0.9rem; padding: 8px 10px; margin-top: 10px;
+      font-size: 1.2rem; padding: 8px 10px; margin-top: 10px;
       }
-      #clear_filters:hover { background-color: #9B2226; color: white; }
+      #clear_filters:hover { background-color: #1f5f5f; color: white; }
 
       .leaflet-container { border-radius:10px; box-shadow:0 4px 12px rgba(29,53,87,0.15); border:1px solid #c1d5e0; }
 
@@ -279,7 +292,7 @@ ui <- fluidPage(
         width: fit-content;
       }
       .view-toggle-btn {
-        padding: 7px 20px; font-size: 0.9rem; font-weight: 600;
+        padding: 7px 20px; font-size: 1.2rem; font-weight: 600;
         border: none; cursor: pointer; transition: all 0.18s ease;
         background: white; color: #1D3557; outline: none;
       }
@@ -295,7 +308,7 @@ ui <- fluidPage(
         border-radius: 8px; padding: 12px 16px;
       }
       .view-card-label {
-        font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+        font-size: 1em; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.08em; color: #888; margin-bottom: 10px;
       }
       .view-card.score-card  { border-left: 3px solid #386150; }
@@ -303,7 +316,7 @@ ui <- fluidPage(
 
       /* ── Filter panel refinements ── */
       .filter-section-label {
-        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+        font-size: 1em; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.09em; color: #457B9D; margin-bottom: 2px;
       }
       .filter-divider {
@@ -338,9 +351,20 @@ ui <- fluidPage(
   ),
   
   div(class = "main-header",
-      h1("National Park Service", style = "margin-bottom:5px;"),
-      h1("Water Supply Vulnerability Assessment Tool",
-         style = "font-size:1.8rem; font-weight:400;")
+      div(class = "main-header-accent"),
+      div(class = "main-header-body",
+          h1("NATIONAL PARK SERVICE",
+             style = "font-size:1rem; font-weight:700; letter-spacing:0.25em;
+                    color:#A8DADC; margin-bottom:8px;"),
+          h1("Water Supply Vulnerability Assessment Tool",
+             style = "font-size:2rem; font-weight:800; letter-spacing:0.01em;
+                    line-height:1.2;"),
+          tags$div(style = "width:50px; height:3px; background:#2a7f7f;
+                          margin:12px auto 10px auto; border-radius:2px;"),
+          em(HTML("&#128679; Under Construction"),
+             style = "display:block; text-align:center; font-size:1.4rem;
+                    color:rgba(255,255,255,0.5);")
+      )
   ),
   
   # ── Controls ──
@@ -350,7 +374,7 @@ ui <- fluidPage(
       tags$details(class = "info-box", style = "cursor:pointer;",
                    tags$summary(style = "font-size:1.3rem; font-weight:600; color:#1D3557; list-style:none;",
                                 icon("info-circle"), " How to Use This Tool",
-                                icon("chevron-down", style = "float:right; font-size:0.9rem; margin-top:5px;")
+                                icon("chevron-down", style = "float:right; font-size:1rem; margin-top:5px;")
                    ),
                    div(style = "margin-top:12px;",
                        p(HTML("This tool visualizes water supply vulnerability across the National Park System
@@ -360,37 +384,37 @@ ui <- fluidPage(
           which combine into an overall <strong style='color:#386150;'>Vulnerability Score</strong>.
           Larger, darker circles indicate higher vulnerability.")),
                        div(style = "background:white; border-radius:8px; padding:14px 18px; margin:10px 0 6px 0; border:1px solid #dce8ef;",
-                           p(style = "font-size:1.05rem; color:#555; margin-bottom:10px;",
+                           p(style = "font-size:1.2rem; color:#555; margin-bottom:10px;",
                              HTML("Scores are computed in four steps using a Euclidean distance framework:")),
                            div(style = "display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:6px; margin-bottom:12px; text-align:center;",
                                div(style = "background:#f5f8fa; border:1px solid #dce8ef; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 1"),
-                                   HTML("<b>Indicators</b> (0&ndash;1)<br><span style='font-size:0.85rem; color:#555;'>normalized raw values</span>")),
+                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 1"),
+                                   HTML("<b>Indicators</b> (0&ndash;1)<br><span style='font-size:1.2rem; color:#555;'>normalized raw values</span>")),
                                div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
                                div(style = "background:#f5f8fa; border:1px solid #dce8ef; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 2"),
-                                   HTML("<b>Factors</b><br><span style='font-size:0.85rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; indicator<sup>2</sup>&thinsp;</span></span><br>
-                     <span style='font-size:0.78rem; color:#888; font-style:italic;'>then normalized to 0&ndash;1</span>")),
+                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 2"),
+                                   HTML("<b>Factors</b><br><span style='font-size:1.2rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; indicator<sup>2</sup>&thinsp;</span></span><br>
+                     <span style='font-size:1.2rem; color:#888; font-style:italic;'>then normalized to 0&ndash;1</span>")),
                                div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
                                div(style = "background:#edf3f8; border:1px solid #c1d5e0; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 3"),
+                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 3"),
                                    HTML("<b style='color:#457B9D;'>Exposure</b> &amp; <b style='color:#C05235;'>Sensitivity</b><br>
-                     <span style='font-size:0.85rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; factor<sup>2</sup>&thinsp;</span></span>")),
+                     <span style='font-size:1.2rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; factor<sup>2</sup>&thinsp;</span></span>")),
                                div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
                                div(style = "background:#e8f0e9; border:1px solid #b2ccb5; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:0.8rem; color:#888; margin-bottom:2px;", "Step 4"),
+                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 4"),
                                    HTML("<b style='color:#386150;'>Vulnerability</b><br>
-                     <span style='font-size:0.85rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;Exp<sup>2</sup> + Sen<sup>2</sup>&thinsp;</span></span>"))
+                     <span style='font-size:1.25rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;Exp<sup>2</sup> + Sen<sup>2</sup>&thinsp;</span></span>"))
                            ),
                            tags$hr(style = "border-color:#dce8ef; margin:8px 0;"),
-                           p(style = "font-size:0.95rem; color:#555; margin-bottom:6px;",
+                           p(style = "font-size:1.2rem; color:#555; margin-bottom:6px;",
                              HTML("<b>Percentile ranks</b> and <b>High Priority</b> flags (shown in popups and the data table)
             indicate where a water supply falls relative to others in the <b>current view</b> &mdash;
             a rank of <b>90</b> means the supply scores higher than 90% of the comparison group.
             Both are recalculated whenever a region, state, or park filter is applied, so
             a supply flagged as High Priority within a filtered view may not hold that designation nationally.")),
                            div(style = "background:#fff8e6; border-left:3px solid #8B6914; border-radius:4px; padding:8px 12px; margin-top:6px;",
-                               p(style = "font-size:0.9rem; color:#5a4a1a; margin:0;",
+                               p(style = "font-size:1.2rem; color:#5a4a1a; margin:0;",
                                  HTML("<b>&#x26A0;&#xFE0F; Scores are relative, not absolute.</b>
                 A score only has meaning within the group it is compared against.
                 The same water supply may rank differently depending on whether it is evaluated
@@ -491,22 +515,22 @@ ui <- fluidPage(
         # Geographic filters group
         column(6,
                div(class = "filter-section-label", HTML("&#x1F4CD; Geographic Filter"),
-                   tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:0.7rem;",
+                   tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:1.2rem;",
                              "(region/state recalculates scores)")),
                fluidRow(
                  column(4,
                         selectInput("filter_region",
-                                    label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:0.85rem;"),
+                                    label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                     choices = c("All Regions" = "", all_regions), selected = "")
                  ),
                  column(4,
                         selectInput("filter_state",
-                                    label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:0.85rem;"),
+                                    label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                     choices = c("All States" = "", all_states), selected = "")
                  ),
                  column(4,
                         selectizeInput("filter_park",
-                                       label = tags$span("Park Unit", style = "color:#1D3557; font-weight:600; font-size:0.85rem;"),
+                                       label = tags$span("Park Unit", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                        choices = c("All Parks" = "", all_parks),
                                        selected = NULL, multiple = TRUE,
                                        options = list(placeholder = "Search parks...",
@@ -516,7 +540,7 @@ ui <- fluidPage(
         ),
         
         # Divider
-        column(1, div(style = "border-left:1px solid #dce8ef; height:70px; margin:18px auto 0;")),
+        # column(1, div(style = "border-left:1px solid #dce8ef; height:70px; margin:2px auto 0;")),
         
         # Priority toggle + info
         column(2,
@@ -534,7 +558,7 @@ ui <- fluidPage(
         ),
         
         # Status badge + clear
-        column(3,
+        column(4,
                div(class = "filter-section-label", HTML("&#x2139;&#xFE0F; Current View")),
                div(style = "margin-top:6px;",
                    uiOutput("filter_info"),
@@ -550,11 +574,11 @@ ui <- fluidPage(
     column(12,
            div(style = "position:relative;",
                uiOutput("map_title"),
-               conditionalPanel(
-                 condition = "output.parks_loading",
-                 div(class = "loading-overlay",
-                     h4(icon("spinner", class = "fa-spin"), " Loading park boundaries..."))
-               ),
+               # conditionalPanel(
+               #   condition = "output.parks_loading",
+               #   div(class = "loading-overlay",
+               #       h4(icon("spinner", class = "fa-spin"), " Loading park boundaries..."))
+               # ),
                leafletOutput("map", height = "calc(110vh - 360px)")
            )
     )
@@ -595,7 +619,7 @@ ui <- fluidPage(
     column(12,
            div(class = "section-panel",
                h4(icon("table"), " Data Table"),
-               p(style = "font-size:1rem; color:#666;",
+               p(style = "font-size:1.2rem; color:#666;",
                  "Click a row to highlight it on the map."),
                DTOutput("data_table")
            )
@@ -605,7 +629,7 @@ ui <- fluidPage(
   # ── Footer ──
   div(style = "margin-top:20px; padding:20px; background-color:#1D3557;
                color:white; text-align:center;",
-      p("Application developed by the Colorado State University Geospatial Centroid | Data current as of 2025",
+      p("Application developed by the Colorado State University Geospatial Centroid | Data current as of April 2026",
         style = "margin:0; opacity:0.9;")
   )
 )
@@ -637,7 +661,7 @@ server <- function(input, output, session) {
     cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
     req(!is.null(cfg))
     div(style = "background:#edf3f8; border-left:3px solid #457B9D; border-radius:4px;
-                 padding:7px 10px; font-size:0.82rem; color:#2c4a6e; line-height:1.4;",
+                 padding:7px 10px; font-size:1.2rem; color:#2c4a6e; line-height:1.4;",
         icon("info-circle", style = "margin-right:4px; color:#457B9D;"),
         cfg$description
     )
@@ -648,6 +672,17 @@ server <- function(input, output, session) {
     updateSelectInput(session, "filter_region", selected = "")
     updateSelectInput(session, "filter_state",  selected = "")
     updateSelectizeInput(session, "filter_park", selected = character(0))
+  })
+  
+  # ── Description pop-out modal ────────────────────────────────────────────
+  observeEvent(input$show_description_btn, {
+    info <- input$show_description_btn
+    showModal(modalDialog(
+      title = paste0("System Description — ", info$id),
+      p(info$text, style = "font-size:1rem; line-height:1.6; color:#333;"),
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
   })
   
   # ── State and Park filters cascade from region/state ─────────────────
@@ -752,17 +787,17 @@ server <- function(input, output, session) {
     
     if (!has_geo_filter && !has_park_filter) {
       tagList(
-        p(style = "color:#666; font-size:1.1rem; margin-top:8px;",
+        p(style = "color:#666; font-size:1.5rem; margin-top:8px;",
           paste0("Showing all ", tot, " water supplies")),
-        tags$span(class = "filter-badge", style = "font-size:0.95rem; background:#386150;",
+        tags$span(class = "filter-badge", style = "font-size:1.2rem; background:#386150;",
                   "\U0001f30e Scores: National")
       )
     } else {
       tagList(
-        p(style = "color:#1D3557; font-weight:600; font-size:1.1rem; margin-top:8px;",
+        p(style = "color:#1D3557; font-weight:600; font-size:1.2rem; margin-top:8px;",
           paste0("Showing ", n, " of ", tot, " water supplies")),
         tags$span(class = "filter-badge",
-                  style = paste0("font-size:0.95rem; background:",
+                  style = paste0("font-size:1.5rem; background:",
                                  if (has_geo_filter) "#386150;" else "#457B9D;"),
                   if (has_geo_filter)
                     paste0("\U0001f4ca Scores: ", context_label)
@@ -810,7 +845,7 @@ server <- function(input, output, session) {
                       border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.2);
                       border-left:4px solid ", border_col, "; z-index:1000; max-width:260px;"),
       h5(title_text, style = paste0("margin:0; color:", border_col,
-                                    "; font-weight:600; font-size:1.05rem;"))
+                                    "; font-weight:600; font-size:1.2rem;"))
     )
   })
   
@@ -838,7 +873,7 @@ server <- function(input, output, session) {
           style     = list("font-weight" = "normal", "border" = "none",
                            "box-shadow" = "none", "background" = "transparent")
         )
-      )
+      ) #%>% 
     # addLayersControl(#baseGroups = c("Terrain", "Light"),
     #   overlayGroups = c("Park Boundaries"),
     #                  options = layersControlOptions(collapsed = FALSE),
@@ -1003,6 +1038,7 @@ server <- function(input, output, session) {
       flag_flood = df[["flag_flood"]], flag_slr = df[["flag_slr"]], flag_drought = df[["flag_drought"]],
       wsd_source_id = df[["wsd_source_id"]], park_unit = df[["park_unit"]],
       park_name = df[["park_name"]], water_system_name = df[["water_system_name"]],
+      system_type = df[["system_type"]], description = df[["description"]],
       state = df[["state"]],
       MoreArgs = list(view_mode = input$view_mode,
                       score_label = popup_score, component = popup_comp,
@@ -1189,10 +1225,10 @@ server <- function(input, output, session) {
   # })
   
   # ── Data table ──────────────────────────────────────────────────────────
-  output$data_table <- renderDT(server = FALSE, {
+  output$data_table <- renderDT(server = TRUE, {
     df <- as.data.frame(filtered_data()) %>%
       select(wsd_source_id, park_unit, park_name, state, region,
-             water_system_name,
+             water_system_name, system_type,
              VULNERABILITY, VULNERABILITY_rank, EXPOSURE, EXPOSURE_rank,
              SENSITIVITY, SENSITIVITY_rank,
              vulnerability_quartile,
@@ -1225,7 +1261,8 @@ server <- function(input, output, session) {
               escape     = FALSE,
               extensions = "Buttons",
               options    = list(
-                paging         = FALSE,
+                paging         = TRUE,
+                pageLength = 50,
                 scrollY        = "400px",
                 scrollX        = TRUE,
                 scrollCollapse = TRUE,
@@ -1250,7 +1287,8 @@ server <- function(input, output, session) {
                            indicator_name, raw_value, raw_label, col_value,
                            vuln_rank, exp_rank, sen_rank,
                            priority, flag_fire, flag_flood, flag_slr, flag_drought,
-                           wsd_source_id, park_unit, park_name, water_system_name, state) {
+                           wsd_source_id, park_unit, park_name, water_system_name,
+                           system_type, description, state) {
     
     top_section <- if (view_mode == "score") {
       paste0("<b style='color:#386150; font-size:14px;'>", score_label, "</b><br>",
@@ -1296,7 +1334,14 @@ server <- function(input, output, session) {
       "<b>Park Unit:</b> ",       park_unit,      "<br>",
       "<b>Park Name:</b> ",       park_name,      "<br>",
       "<b>Water System:</b> ",    water_system_name, "<br>",
+      "<b>System Type:</b> ",     ifelse(is.na(system_type), "<span style='color:#999;'>N/A</span>", system_type), "<br>",
       "<b>State:</b> ",           state,           "<br>",
+      if (!is.na(description) && nchar(trimws(description)) > 0)
+        paste0("<a href='#' onclick=\"Shiny.setInputValue('show_description_btn', {id:'",
+               wsd_source_id, "', text: '", gsub("'", "\\'", description, fixed = TRUE), "'}, ",
+               "{priority:'event'}); return false;\" ",
+               "style='font-size:11px; color:#457B9D;'>&#x1F4C4; View Full Description</a><br>")
+      else "",
       "<hr style='margin:6px 0; border-color:#ddd;'>",
       "<button onclick=\"Shiny.setInputValue('show_chart_btn', '", wsd_source_id,
       "', {priority: 'event'});\" ",
