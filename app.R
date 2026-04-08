@@ -13,6 +13,8 @@ library(purrr)
 library(DT)
 library(plotly)
 library(later)
+library(base64enc)
+library(ggplot2)
 # library(promises)
 # library(future)
 # plan(multisession)
@@ -347,6 +349,22 @@ ui <- fluidPage(
         border:1px solid #dce8ef;
       }
       .section-panel h4 { color:#1D3557; font-weight:600; margin-top:0; }
+      
+      /* ── DT selected row highlight ── */
+      table.dataTable tbody tr.selected td,
+      table.dataTable tbody tr.selected,
+      table.dataTable tbody > tr.selected,
+      table.dataTable tbody > tr > td.selected,
+      table.dataTable tbody > tr.active td {
+        background-color: #d0e8f2 !important;
+        color: #1D3557 !important;
+        box-shadow: none !important;
+      }
+      
+      .dataTables_wrapper table.dataTable tbody tr.selected td {
+        background-color: #d0e8f2 !important;
+      }
+      
     "))
   ),
   
@@ -361,7 +379,7 @@ ui <- fluidPage(
                     line-height:1.2;"),
           tags$div(style = "width:50px; height:3px; background:#2a7f7f;
                           margin:12px auto 10px auto; border-radius:2px;"),
-          em(HTML("&#128679; Under Construction"),
+          em(HTML("&#128679; This app is under active development. All results are preliminary and should not be shared out at this time."),
              style = "display:block; text-align:center; font-size:1.4rem;
                     color:rgba(255,255,255,0.5);")
       )
@@ -372,7 +390,7 @@ ui <- fluidPage(
       
       # Collapsible how-to box
       tags$details(class = "info-box", style = "cursor:pointer;",
-                   tags$summary(style = "font-size:1.3rem; font-weight:600; color:#1D3557; list-style:none;",
+                   tags$summary(style = "font-size:1.5rem; font-weight:600; color:#1D3557; list-style:none;",
                                 icon("info-circle"), " How to Use This Tool",
                                 icon("chevron-down", style = "float:right; font-size:1rem; margin-top:5px;")
                    ),
@@ -661,7 +679,7 @@ server <- function(input, output, session) {
     cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
     req(!is.null(cfg))
     div(style = "background:#edf3f8; border-left:3px solid #457B9D; border-radius:4px;
-                 padding:7px 10px; font-size:1.2rem; color:#2c4a6e; line-height:1.4;",
+                 padding:7px 10px; font-size:1.5rem; color:#2c4a6e; line-height:1.4;",
         icon("info-circle", style = "margin-right:4px; color:#457B9D;"),
         cfg$description
     )
@@ -679,7 +697,7 @@ server <- function(input, output, session) {
     info <- input$show_description_btn
     showModal(modalDialog(
       title = paste0("System Description — ", info$id),
-      p(info$text, style = "font-size:1rem; line-height:1.6; color:#333;"),
+      p(info$text, style = "font-size:1.5rem; line-height:1.6; color:#333;"),
       easyClose = TRUE,
       footer = modalButton("Close")
     ))
@@ -854,9 +872,10 @@ server <- function(input, output, session) {
     leaflet() %>%
       addProviderTiles(providers$OpenStreetMap, group = "OpenStreetMap") %>%
       #addProviderTiles(providers$CartoDB.Voyager, group = "Terrain") %>% 
-      setView(lng = -98.5, lat = 37, zoom = 4) %>%
+      setView(lng = -98.5, lat = 37, zoom = 5) %>%
       addMapPane("background", zIndex = 410) %>%
       addMapPane("markers",    zIndex = 450) %>%
+      addMapPane("highlights", zIndex = 420) %>% 
       addPolygons(
         data        = park_boundaries,
         group       = "Park Boundaries",
@@ -1047,7 +1066,8 @@ server <- function(input, output, session) {
     ))
     
     leafletProxy("map") %>%
-      clearMarkers() %>% clearControls() %>%
+      #clearMarkers() %>% clearControls() %>%
+      clearMarkers() %>% removeControl("legend") %>% clearGroup("highlight") %>%
       addCircleMarkers(data = plot_data, radius = radius_vec, color = "#1D3557",
                        fillColor = fill_vec, fillOpacity = 0.9,
                        stroke = TRUE, weight = 1, popup = popup_vec,
@@ -1060,7 +1080,7 @@ server <- function(input, output, session) {
                        layerId = as.data.frame(plot_data)[["wsd_source_id"]]) %>%
       addLegend(pal = pal, values = na.omit(vals), title = legend_title,
                 na.label = "No Data", position = "bottomright",
-                opacity = 1)
+                opacity = 1, layerId = "legend")
   })
   
   # ── Factor score breakdown chart ────────────────────────────────────────
@@ -1104,6 +1124,35 @@ server <- function(input, output, session) {
     click <- input$map_marker_click
     req(!is.null(click$id))
     clicked_site(click$id)
+  })
+  
+  # ── Table row click → zoom map to selected site ─────────────────────────
+  observeEvent(input$data_table_rows_selected, {
+    row_idx <- input$data_table_rows_selected
+    req(length(row_idx) > 0)
+    
+    # Use the cached ID vector (same row order DT received)
+    ids <- dt_ids()
+    req(length(ids) >= row_idx)
+    selected_id <- ids[row_idx]
+    req(!is.null(selected_id), !is.na(selected_id))
+    
+    # Look up coordinates from the pre-computed global lookup (no reactive dependency)
+    site_coords <- coord_lookup[coord_lookup$wsd_source_id == selected_id, ]
+    req(nrow(site_coords) > 0)
+    
+    lng <- site_coords$lng[1]
+    lat <- site_coords$lat[1]
+    req(is.finite(lng), is.finite(lat))
+    
+    leafletProxy("map") %>%
+      clearGroup("highlight") %>%
+      setView(lng = lng, lat = lat, zoom = 12) %>%
+      addCircleMarkers(lng = lng, lat = lat,
+                       radius = 18, color = "aquamarine", fillColor = "transparent",
+                       fillOpacity = 0, stroke = TRUE, weight = 4, opacity = 1,
+                       group = "highlight",
+                       options = pathOptions(pane = "highlights"))
   })
   
   # ── Popup button → modal with site chart ────────────────────────────────
@@ -1156,6 +1205,281 @@ server <- function(input, output, session) {
       easyClose = TRUE,
       footer    = modalButton("Close")
     ))
+  })
+  
+ #### Generate Report button → build HTML report ####
+  observeEvent(input$generate_report_btn, {
+    site_id <- input$generate_report_btn
+    req(site_id %in% combined_raw$wsd_source_id)
+    
+    notif_id <- showNotification(
+      "Generating report...", duration = NULL, closeButton = FALSE, type = "message"
+    )
+    
+    tryCatch({
+      # ── Site metadata ────────────────────────────────────────────────────
+      site_meta  <- combined_raw[combined_raw$wsd_source_id == site_id, ]
+      site_park  <- site_meta$park_unit[1]
+      site_state <- site_meta$state[1]
+      site_region <- site_meta$region[1]
+      sys_type   <- ifelse(is.na(site_meta$system_type[1]), "N/A", site_meta$system_type[1])
+      desc_text  <- ifelse(is.na(site_meta$description[1]) || nchar(trimws(site_meta$description[1])) == 0,
+                           "", site_meta$description[1])
+      
+      # ── Helper: extract ranks from a scored dataframe ────────────────────
+      extract_ranks <- function(scored_df, sid) {
+        row <- scored_df[scored_df$wsd_source_id == sid, ]
+        if (nrow(row) == 0) return(list(vuln_rank = NA, exp_rank = NA, sen_rank = NA,
+                                        n = nrow(scored_df), priority = NA))
+        list(
+          vuln_rank = round(row$VULNERABILITY_rank[1], 1),
+          exp_rank  = round(row$EXPOSURE_rank[1], 1),
+          sen_rank  = round(row$SENSITIVITY_rank[1], 1),
+          n         = nrow(scored_df),
+          priority  = isTRUE(row$priority_national[1])
+        )
+      }
+      
+      # ── National: reuse the already-computed combined_data (no recalc!) ──
+      national_df <- as.data.frame(combined_data)
+      national    <- extract_ranks(national_df, site_id)
+      
+      # ── Regional, State, Park: recalc only the subsets ───────────────────
+      regional <- if (nrow(combined_raw[combined_raw$region == site_region, ]) >= 2) {
+        extract_ranks(calc_vulnerability_index(combined_raw[combined_raw$region == site_region, ]), site_id)
+      } else { list(vuln_rank = NA, exp_rank = NA, sen_rank = NA, n = 1, priority = NA) }
+      
+      state_ranks <- if (nrow(combined_raw[combined_raw$state == site_state, ]) >= 2) {
+        extract_ranks(calc_vulnerability_index(combined_raw[combined_raw$state == site_state, ]), site_id)
+      } else { list(vuln_rank = NA, exp_rank = NA, sen_rank = NA, n = 1, priority = NA) }
+      
+      park_ranks <- if (nrow(combined_raw[combined_raw$park_unit == site_park, ]) >= 2) {
+        extract_ranks(calc_vulnerability_index(combined_raw[combined_raw$park_unit == site_park, ]), site_id)
+      } else { list(vuln_rank = NA, exp_rank = NA, sen_rank = NA, n = 1, priority = NA) }
+      
+      # ── Bar chart data (from national, already computed) ─────────────────
+      site_scored <- national_df[national_df$wsd_source_id == site_id, ]
+      fac_cols    <- names(factor_labels)[names(factor_labels) %in% names(national_df)]
+      nat_means   <- colMeans(national_df[, fac_cols, drop = FALSE], na.rm = TRUE)
+      site_vals   <- as.numeric(site_scored[1, fac_cols])
+      bar_labels  <- factor_labels[fac_cols]
+      components  <- ifelse(grepl("exp", fac_cols), "Exposure", "Sensitivity")
+      
+      # ── Hazard flags ─────────────────────────────────────────────────────
+      flags <- c(
+        if (isTRUE(site_scored$flag_fire[1]))    "\U0001F525 Fire"    else NULL,
+        if (isTRUE(site_scored$flag_flood[1]))   "\U0001F4A7 Flood"   else NULL,
+        if (isTRUE(site_scored$flag_slr[1]))     "\U0001F30A SLR"     else NULL,
+        if (isTRUE(site_scored$flag_drought[1])) "\u2600\uFE0F Drought" else NULL
+      )
+      
+      # ── Generate chart as base64 PNG ─────────────────────────────────────
+      chart_df <- data.frame(
+        factor    = factor(bar_labels, levels = bar_labels),
+        score     = site_vals,
+        component = components,
+        stringsAsFactors = FALSE
+      )
+      
+      site_fill <- ifelse(components == "Exposure", "#457B9D", "#C05235")
+      
+      p <- ggplot2::ggplot(chart_df, ggplot2::aes(x = factor, y = score, fill = factor)) +
+        ggplot2::geom_col(width = 0.65) +
+        ggplot2::scale_fill_manual(values = setNames(site_fill, bar_labels), guide = "none") +
+        ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0, 0.05))) +
+        ggplot2::labs(x = NULL, y = "Score (0-1)") +
+        ggplot2::theme_minimal(base_size = 11) +
+        ggplot2::theme(
+          axis.text.x = ggplot2::element_text(angle = 45, hjust = 1, size = 8),
+          panel.grid.major.x = ggplot2::element_blank(),
+          legend.position = "none",
+          plot.background = ggplot2::element_rect(fill = "white", color = NA),
+          panel.background = ggplot2::element_rect(fill = "white", color = NA)
+        )
+      
+      chart_file <- tempfile(fileext = ".png")
+      ggplot2::ggsave(chart_file, p, width = 8, height = 4.5, dpi = 150, bg = "white")
+      chart_b64 <- base64enc::base64encode(chart_file)
+      
+      # ── Build the ranking boxes HTML ─────────────────────────────────────
+      make_rank_box <- function(label, ranks, color) {
+        rank_val <- if (is.na(ranks$vuln_rank)) "N/A" else paste0(ranks$vuln_rank, "%")
+        priority_badge <- if (isTRUE(ranks$priority))
+          "<span style='background:#9B2226;color:white;padding:2px 6px;border-radius:3px;font-size:10px;'>TOP PRIORITY</span>" else ""
+        paste0(
+          "<div style='flex:1;background:white;border-radius:8px;padding:14px 12px;border-top:4px solid ", color, ";",
+          "box-shadow:0 2px 6px rgba(0,0,0,0.08);text-align:center;min-width:140px;'>",
+          "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;'>", label, "</div>",
+          "<div style='font-size:28px;font-weight:800;color:", color, ";'>", rank_val, "</div>",
+          "<div style='font-size:11px;color:#999;margin-top:2px;'>n = ", ranks$n, " sites</div>",
+          priority_badge,
+          "</div>"
+        )
+      }
+      
+      rank_boxes <- paste0(
+        "<div style='display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;'>",
+        make_rank_box(paste0("Within Park (", site_park, ")"), park_ranks, "#2a7f7f"),
+        make_rank_box(paste0("Within State (", site_state, ")"), state_ranks, "#457B9D"),
+        make_rank_box(paste0("Within Region (", site_region, ")"), regional, "#1D3557"),
+        make_rank_box("Nationally", national, "#386150"),
+        "</div>"
+      )
+      
+      # ── Sub-component ranks table ────────────────────────────────────────
+      make_rank_row <- function(label, ranks) {
+        fmt <- function(v) if (is.na(v)) "--" else paste0(v, "%")
+        paste0("<tr><td style='padding:6px 10px;font-weight:600;'>", label, "</td>",
+               "<td style='padding:6px 10px;text-align:center;'>", fmt(ranks$vuln_rank), "</td>",
+               "<td style='padding:6px 10px;text-align:center;color:#457B9D;'>", fmt(ranks$exp_rank), "</td>",
+               "<td style='padding:6px 10px;text-align:center;color:#C05235;'>", fmt(ranks$sen_rank), "</td>",
+               "<td style='padding:6px 10px;text-align:center;'>", ranks$n, "</td></tr>")
+      }
+      
+      rank_table <- paste0(
+        "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;'>",
+        "<thead><tr style='background:#f0f5f8;border-bottom:2px solid #1D3557;'>",
+        "<th style='padding:8px 10px;text-align:left;color:#1D3557;'>Scope</th>",
+        "<th style='padding:8px 10px;text-align:center;color:#386150;'>Vulnerability</th>",
+        "<th style='padding:8px 10px;text-align:center;color:#457B9D;'>Exposure</th>",
+        "<th style='padding:8px 10px;text-align:center;color:#C05235;'>Sensitivity</th>",
+        "<th style='padding:8px 10px;text-align:center;color:#666;'>N Sites</th>",
+        "</tr></thead><tbody>",
+        make_rank_row(paste0("Within Park (", site_park, ")"), park_ranks),
+        make_rank_row(paste0("Within State (", site_state, ")"), state_ranks),
+        make_rank_row(paste0("Within Region (", site_region, ")"), regional),
+        make_rank_row("Nationally", national),
+        "</tbody></table>"
+      )
+      
+      # ── Hazard flags HTML ────────────────────────────────────────────────
+      flag_colors <- c("\U0001F525 Fire" = "#C05235", "\U0001F4A7 Flood" = "#457B9D",
+                       "\U0001F30A SLR" = "#1D3557", "\u2600\uFE0F Drought" = "#8B6914")
+      flags_html <- if (length(flags) > 0) {
+        badges <- sapply(flags, function(f) {
+          col <- ifelse(f %in% names(flag_colors), flag_colors[f], "#666")
+          paste0("<span style='background:", col, ";color:white;padding:3px 10px;border-radius:4px;",
+                 "font-size:12px;margin-right:4px;'>", f, "</span>")
+        })
+        paste0("<div style='margin:10px 0;'>", paste(badges, collapse = " "), "</div>")
+      } else ""
+      
+      # ── Raw scores ──────────────────────────────────────────────────────
+      vuln_score <- round(site_scored$VULNERABILITY[1], 3)
+      exp_score  <- round(site_scored$EXPOSURE[1], 3)
+      sen_score  <- round(site_scored$SENSITIVITY[1], 3)
+      
+      # ── Description section ──────────────────────────────────────────────
+      desc_html <- if (nchar(desc_text) > 0) {
+        paste0("<div style='background:#f7fafc;border-left:3px solid #2a7f7f;padding:10px 14px;",
+               "border-radius:4px;margin:10px 0;font-size:13px;color:#333;line-height:1.5;'>",
+               "<strong>System Description:</strong> ", htmltools::htmlEscape(desc_text), "</div>")
+      } else ""
+      
+      # ── Assemble full HTML ───────────────────────────────────────────────
+      html_content <- paste0(
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+        "<title>Vulnerability Report - ", htmltools::htmlEscape(site_meta$park_name[1]), "</title>",
+        "<style>",
+        "body{font-family:Arial,Helvetica,sans-serif;max-width:850px;margin:0 auto;padding:30px 40px;color:#333;line-height:1.5;}",
+        "h1{color:#1D3557;font-size:24px;margin:0 0 4px 0;}",
+        "h2{color:#1D3557;font-size:17px;border-bottom:2px solid #2a7f7f;padding-bottom:4px;margin-top:28px;}",
+        ".subtitle{color:#386150;font-size:16px;font-weight:600;margin:0 0 2px 0;}",
+        ".meta{color:#888;font-size:13px;margin:0 0 8px 0;}",
+        ".accent-line{height:3px;background:linear-gradient(90deg,#1D3557,#2a7f7f,#A8DADC);border-radius:2px;margin:12px 0 20px 0;}",
+        "table{border-collapse:collapse;width:100%;}",
+        "thead tr{border-bottom:2px solid #1D3557;}",
+        "tbody tr{border-bottom:1px solid #eee;}",
+        "tbody tr:hover{background:#f8fbfd;}",
+        ".info-table td{padding:5px 10px;font-size:13px;}",
+        ".info-table td:first-child{font-weight:600;color:#1D3557;width:140px;}",
+        ".score-row{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;}",
+        ".score-box{background:#f0f5f8;border-radius:6px;padding:10px 16px;text-align:center;flex:1;min-width:120px;}",
+        ".score-box .label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.05em;}",
+        ".score-box .value{font-size:22px;font-weight:700;}",
+        ".footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;text-align:center;font-size:11px;color:#999;}",
+        "@media print{body{padding:20px;}}",
+        "</style></head><body>",
+        
+        # Header
+        "<h1>Water Supply Vulnerability Report</h1>",
+        "<p class='subtitle'>", htmltools::htmlEscape(site_meta$park_name[1]), "</p>",
+        "<p class='meta'>", htmltools::htmlEscape(site_meta$water_system_name[1]),
+        " &nbsp;|&nbsp; ", site_id,
+        " &nbsp;|&nbsp; Generated ", format(Sys.Date(), "%B %d, %Y"), "</p>",
+        "<div class='accent-line'></div>",
+        
+        # Site Info
+        "<h2>Site Information</h2>",
+        "<table class='info-table'>",
+        "<tr><td>Park Unit</td><td>", htmltools::htmlEscape(site_park), "</td></tr>",
+        "<tr><td>Park Name</td><td>", htmltools::htmlEscape(site_meta$park_name[1]), "</td></tr>",
+        "<tr><td>State</td><td>", htmltools::htmlEscape(site_state), "</td></tr>",
+        "<tr><td>Region</td><td>", htmltools::htmlEscape(site_region), "</td></tr>",
+        "<tr><td>Water System</td><td>", htmltools::htmlEscape(site_meta$water_system_name[1]), "</td></tr>",
+        "<tr><td>System Type</td><td>", htmltools::htmlEscape(sys_type), "</td></tr>",
+        "</table>",
+        desc_html,
+        flags_html,
+        
+        # Raw scores
+        "<div class='score-row'>",
+        "<div class='score-box'><div class='label'>Vulnerability</div><div class='value' style='color:#386150;'>", vuln_score, "</div></div>",
+        "<div class='score-box'><div class='label'>Exposure</div><div class='value' style='color:#457B9D;'>", exp_score, "</div></div>",
+        "<div class='score-box'><div class='label'>Sensitivity</div><div class='value' style='color:#C05235;'>", sen_score, "</div></div>",
+        "</div>",
+        
+        # Priority Rankings
+        "<h2>Priority Rankings</h2>",
+        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Vulnerability percentile rank at four geographic scopes. A rank of 90 means the supply scores higher than 90% of the comparison group.</p>",
+        rank_boxes,
+        rank_table,
+        
+        # Chart
+        "<h2>Factor Score Breakdown</h2>",
+        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Comparison of this site&#39;s factor scores against the national mean. Blue = Exposure, Red = Sensitivity.</p>",
+        "<img src='data:image/png;base64,", chart_b64, "' style='width:100%;max-width:750px;display:block;margin:12px auto;' />",
+        
+        # Footer
+        "<div class='footer'>",
+        "NPS Water Supply Vulnerability Assessment Tool<br>",
+        "Scores calculated using the Michalak et al. (2026) Euclidean distance framework<br>",
+        "Colorado State University Geospatial Centroid &nbsp;|&nbsp; ", format(Sys.Date(), "%B %Y"),
+        "</div>",
+        
+        "</body></html>"
+      )
+      
+      # ── Write HTML file ──────────────────────────────────────────────────
+      report_path <- file.path(tempdir(), paste0("report_", site_id, ".html"))
+      writeLines(html_content, report_path)
+      
+      removeNotification(notif_id)
+      
+      output$download_report <- downloadHandler(
+        filename = function() paste0("vulnerability_report_", site_id, ".html"),
+        content  = function(file) file.copy(report_path, file)
+      )
+      
+      showModal(modalDialog(
+        title = paste0("Report Ready: ", site_meta$park_name[1], " \u2013 ", site_id),
+        tags$p("Your vulnerability report has been generated. Open the downloaded file in a browser and use Print > Save as PDF if you need a PDF.",
+               style = "font-size:13px; color:#333;"),
+        downloadButton("download_report", "Download Report",
+                       style = "background:#2a7f7f; color:white; border:none; border-radius:4px; 
+                                padding:8px 16px; font-size:13px; font-weight:600;"),
+        size      = "m",
+        easyClose = TRUE,
+        footer    = modalButton("Close")
+      ))
+      
+    }, error = function(e) {
+      removeNotification(notif_id)
+      showNotification(
+        paste0("Report generation failed: ", e$message),
+        type = "error", duration = 8
+      )
+    })
   })
   
   # # ── Clicked site reactive ───────────────────────────────────────────────
@@ -1224,6 +1548,16 @@ server <- function(input, output, session) {
   #     )
   # })
   
+  # ── Pre-compute coordinate lookup from the GLOBAL sf object ────────────
+  # This never changes, so no reactive needed — avoids triggering any chain
+  coord_lookup <- as.data.frame(st_coordinates(combined_data))
+  coord_lookup$wsd_source_id <- combined_data$wsd_source_id
+  names(coord_lookup) <- c("lng", "lat", "wsd_source_id")
+  
+  # Track the wsd_source_id vector in the same row order as the DT receives
+  
+  dt_ids <- reactiveVal(character(0))
+  
   # ── Data table ──────────────────────────────────────────────────────────
   output$data_table <- renderDT(server = TRUE, {
     df <- as.data.frame(filtered_data()) %>%
@@ -1254,6 +1588,10 @@ server <- function(input, output, session) {
     # Move priority_flags to be right after the score columns, before indicator columns
     df <- df %>%
       relocate(priority_flags, .before = VULNERABILITY)
+    
+    # Store the wsd_source_id vector in the SAME row order DT will receive
+    # (server=TRUE means DT row indices map to this ordering)
+    dt_ids(df$wsd_source_id)
     
     datatable(df,
               selection  = "single",
@@ -1346,8 +1684,13 @@ server <- function(input, output, session) {
       "<button onclick=\"Shiny.setInputValue('show_chart_btn', '", wsd_source_id,
       "', {priority: 'event'});\" ",
       "style='background:#1D3557;color:white;border:none;border-radius:4px;",
+      "padding:5px 10px;font-size:11px;cursor:pointer;width:100%;margin-bottom:4px;'>",
+      "&#x1F4CA; View Score Breakdown</button>",
+      "<button onclick=\"Shiny.setInputValue('generate_report_btn', '", wsd_source_id,
+      "', {priority: 'event'});\" ",
+      "style='background:#2a7f7f;color:white;border:none;border-radius:4px;",
       "padding:5px 10px;font-size:11px;cursor:pointer;width:100%;'>",
-      "&#x1F4CA; View Score Breakdown</button>")
+      "&#x1F4C4; Generate Report</button>")
     
     paste0("<div style='font-family:Arial; font-size:12px; min-width:210px;'>",
            top_section, score_section, flag_section, site_section, "</div>")
