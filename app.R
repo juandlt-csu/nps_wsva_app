@@ -16,7 +16,7 @@ plan(multisession)
 ############# DATA ############
 parks <- st_read("app_data/park_boundaries_2025-08-14.gpkg") %>% 
   st_transform(st_crs = 4326) #%>% 
-#st_simplify(5000)
+  #st_simplify(5000)
 
 # read in water supply database
 water_supplies <- read_csv("app_data/water_supplies.csv") %>% 
@@ -249,7 +249,7 @@ ui <- fluidPage(
         )
       ),
       
-      
+     
   ),
   
   # Map section
@@ -369,7 +369,7 @@ server <- function(input, output, session) {
     }
     
     # KEEP NAs for internal use --- Filter out missing values
-    # filtered_data <- combined_data[!is.na(combined_data[[column_name()]]), ]
+   # filtered_data <- combined_data[!is.na(combined_data[[column_name()]]), ]
     
     #return(filtered_data)
     return(combined_data)
@@ -426,10 +426,10 @@ server <- function(input, output, session) {
     if ("Park Boundaries" %in% input$map_groups) {
       # User turned on parks layer - show loading immediately
       parks_loading(TRUE)
-      
+
       # Small delay to let UI update
       Sys.sleep(0.3)
-      
+
       leafletProxy("map", session = session) %>%
         addPolygons(
           data = parks,
@@ -447,9 +447,9 @@ server <- function(input, output, session) {
             "</div>"
           )
         )
-      
+
       parks_loading(FALSE)
-      
+
     } else {
       # User turned off parks layer
       leafletProxy("map", session = session) %>%
