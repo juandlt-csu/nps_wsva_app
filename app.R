@@ -380,8 +380,8 @@ ui <- fluidPage(
           tags$div(style = "width:50px; height:3px; background:#2a7f7f;
                           margin:12px auto 10px auto; border-radius:2px;"),
           em(HTML("&#128679; This app is under active development. All results are preliminary and should not be shared out at this time."),
-             style = "display:block; text-align:center; font-size:1.4rem;
-                    color:rgba(255,255,255,0.5);")
+             style = "display:block; text-align:center; font-size:1.5rem; font-weight: 600;
+                    color:rgba(255, 100, 0, 1);")
       )
   ),
   
