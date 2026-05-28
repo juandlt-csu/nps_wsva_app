@@ -36,7 +36,7 @@ park_boundaries <- st_read("app_data/parks_simplified.gpkg")
 
 water_supplies <- read_csv("app_data/water_supplies.csv") %>%
   select(wsd_source_id, park_unit, park_name, region, state,
-         water_system_name, system_type, description,
+         water_system_name, source_type, description,
          source_longitude, source_latitude)
 
 # Raw indicators — vulnerability scores are calculated on the fly
@@ -560,23 +560,37 @@ ui <- fluidPage(
         # Divider
         # column(1, div(style = "border-left:1px solid #dce8ef; height:70px; margin:2px auto 0;")),
         
-        # Priority toggle + info
-        column(2,
-               div(class = "filter-section-label", HTML("&#x26A0;&#xFE0F; Priority Filter")),
-               br(),
-               div(style = "margin-top:6px;",
-                   materialSwitch(
-                     inputId = "filter_priority",
-                     label   = tags$span("Top Priority Only",
-                                         style = "color:#1D3557; font-weight:600; font-size:1.15rem;"),
-                     value   = FALSE,
-                     status  = "danger"
-                   )
+        # Priority toggle + Source Type filter
+        column(4,
+               fluidRow(
+                 column(6,
+                        div(class = "filter-section-label", HTML("&#x26A0;&#xFE0F; Priority Filter")),
+                        br(),
+                        div(style = "margin-top:6px;",
+                            materialSwitch(
+                              inputId = "filter_priority",
+                              label   = tags$span("Top Priority Only",
+                                                  style = "color:#1D3557; font-weight:600; font-size:1.15rem;"),
+                              value   = FALSE,
+                              status  = "danger"
+                            )
+                        )
+                 ),
+                 column(6,
+                        div(class = "filter-section-label", HTML("&#x1F4A7; Filter by Source Type")),
+                        selectizeInput("filter_source_type",
+                                       label = NULL,
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE,
+                                       options = list(placeholder = "All source types...",
+                                                      plugins = list("remove_button")))
+                 )
                )
         ),
         
         # Status badge + clear
-        column(4,
+        column(2,
                div(class = "filter-section-label", HTML("&#x2139;&#xFE0F; Current View")),
                div(style = "margin-top:6px;",
                    uiOutput("filter_info"),
@@ -690,6 +704,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "filter_region", selected = "")
     updateSelectInput(session, "filter_state",  selected = "")
     updateSelectizeInput(session, "filter_park", selected = character(0))
+    updateSelectizeInput(session, "filter_source_type", selected = character(0))
   })
   
   # ── Description pop-out modal ────────────────────────────────────────────
@@ -768,6 +783,25 @@ server <- function(input, output, session) {
     # Apply priority filter AFTER recalculation so it reflects updated rankings
     if (isTRUE(input$filter_priority)) df <- df %>% filter(priority_national == TRUE)
     
+    df
+  })
+  
+  # ── Populate source type choices from geo/priority-filtered data ────────
+  observe({
+    df <- as.data.frame(filtered_data())
+    types_avail <- sort(unique(na.omit(df$source_type)))
+    current_sel <- intersect(input$filter_source_type, types_avail)
+    updateSelectizeInput(session, "filter_source_type",
+                         choices  = types_avail,
+                         selected = current_sel)
+  })
+  
+  # ── Display data: source_type filter applied on top, no recalculation ───
+  filtered_data_display <- reactive({
+    df <- filtered_data()
+    if (length(input$filter_source_type) > 0) {
+      df <- df %>% filter(source_type %in% input$filter_source_type)
+    }
     df
   })
   
@@ -980,7 +1014,7 @@ server <- function(input, output, session) {
   observe({
     req(active_column())
     col       <- active_column()
-    plot_data <- filtered_data()
+    plot_data <- filtered_data_display()
     req(col %in% names(plot_data))
     
     vals    <- as.numeric(as.data.frame(plot_data)[[col]])
@@ -1057,7 +1091,7 @@ server <- function(input, output, session) {
       flag_flood = df[["flag_flood"]], flag_slr = df[["flag_slr"]], flag_drought = df[["flag_drought"]],
       wsd_source_id = df[["wsd_source_id"]], park_unit = df[["park_unit"]],
       park_name = df[["park_name"]], water_system_name = df[["water_system_name"]],
-      system_type = df[["system_type"]], description = df[["description"]],
+      source_type = df[["source_type"]], description = df[["description"]],
       state = df[["state"]],
       MoreArgs = list(view_mode = input$view_mode,
                       score_label = popup_score, component = popup_comp,
@@ -1207,7 +1241,7 @@ server <- function(input, output, session) {
     ))
   })
   
- #### Generate Report button → build HTML report ####
+  #### Generate Report button → build HTML report ####
   observeEvent(input$generate_report_btn, {
     site_id <- input$generate_report_btn
     req(site_id %in% combined_raw$wsd_source_id)
@@ -1222,7 +1256,7 @@ server <- function(input, output, session) {
       site_park  <- site_meta$park_unit[1]
       site_state <- site_meta$state[1]
       site_region <- site_meta$region[1]
-      sys_type   <- ifelse(is.na(site_meta$system_type[1]), "N/A", site_meta$system_type[1])
+      sys_type   <- ifelse(is.na(site_meta$source_type[1]), "N/A", site_meta$source_type[1])
       desc_text  <- ifelse(is.na(site_meta$description[1]) || nchar(trimws(site_meta$description[1])) == 0,
                            "", site_meta$description[1])
       
@@ -1417,7 +1451,7 @@ server <- function(input, output, session) {
         "<tr><td>State</td><td>", htmltools::htmlEscape(site_state), "</td></tr>",
         "<tr><td>Region</td><td>", htmltools::htmlEscape(site_region), "</td></tr>",
         "<tr><td>Water System</td><td>", htmltools::htmlEscape(site_meta$water_system_name[1]), "</td></tr>",
-        "<tr><td>System Type</td><td>", htmltools::htmlEscape(sys_type), "</td></tr>",
+        "<tr><td>Source Type</td><td>", htmltools::htmlEscape(sys_type), "</td></tr>",
         "</table>",
         desc_html,
         flags_html,
@@ -1560,9 +1594,9 @@ server <- function(input, output, session) {
   
   # ── Data table ──────────────────────────────────────────────────────────
   output$data_table <- renderDT(server = TRUE, {
-    df <- as.data.frame(filtered_data()) %>%
+    df <- as.data.frame(filtered_data_display()) %>%
       select(wsd_source_id, park_unit, park_name, state, region,
-             water_system_name, system_type,
+             water_system_name, source_type,
              VULNERABILITY, VULNERABILITY_rank, EXPOSURE, EXPOSURE_rank,
              SENSITIVITY, SENSITIVITY_rank,
              vulnerability_quartile,
@@ -1626,7 +1660,7 @@ server <- function(input, output, session) {
                            vuln_rank, exp_rank, sen_rank,
                            priority, flag_fire, flag_flood, flag_slr, flag_drought,
                            wsd_source_id, park_unit, park_name, water_system_name,
-                           system_type, description, state) {
+                           source_type, description, state) {
     
     top_section <- if (view_mode == "score") {
       paste0("<b style='color:#386150; font-size:14px;'>", score_label, "</b><br>",
@@ -1672,7 +1706,7 @@ server <- function(input, output, session) {
       "<b>Park Unit:</b> ",       park_unit,      "<br>",
       "<b>Park Name:</b> ",       park_name,      "<br>",
       "<b>Water System:</b> ",    water_system_name, "<br>",
-      "<b>System Type:</b> ",     ifelse(is.na(system_type), "<span style='color:#999;'>N/A</span>", system_type), "<br>",
+      "<b>Source Type:</b> ",     ifelse(is.na(source_type), "<span style='color:#999;'>N/A</span>", source_type), "<br>",
       "<b>State:</b> ",           state,           "<br>",
       if (!is.na(description) && nchar(trimws(description)) > 0)
         paste0("<a href='#' onclick=\"Shiny.setInputValue('show_description_btn', {id:'",
