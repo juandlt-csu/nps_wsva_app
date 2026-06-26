@@ -86,16 +86,16 @@ indicator_config <- list(
         description = "% of climate models predicting a precipitation decrease"
       )
     ),
-    "SWE" = list(
-      "Change in SWE" = list(
-        col = "norm_exp_swe_change", raw_col = "exp_swe_change",
-        raw_label = "% change mean annual SWE (p10)",
-        description = "Projected % change in mean annual snow water equivalent (p10)"
+    "Drought" = list(
+      "Change in Drought (SPEI)" = list(
+        col = "norm_exp_drought_change", raw_col = "exp_drought_change",
+        raw_label = "Change in drought (SPEI)",
+        description = "Projected change in SPEI based on monthly precipitation and PET"
       ),
-      "SWE Model Agreement" = list(
-        col = "norm_exp_swe_model_agree", raw_col = "exp_swe_model_agree",
+      "Drough Model Agreement" = list(
+        col = "norm_exp_drought_model_agree", raw_col = "exp_drought_model_agree",
         raw_label = "% models predicting decrease",
-        description = "% of climate models predicting a decrease in SWE"
+        description = "% of climate models predicting a decrease in SPEI"
       )
     ),
     "Sea Level Rise" = list(
@@ -103,6 +103,16 @@ indicator_config <- list(
         col = "norm_exp_inundation_slr", raw_col = "exp_inundation_slr",
         raw_label = "% point change in inundated area",
         description = "Projected % change in area inundated by sea level rise"
+      ),
+      "Saltwater Intrusion" = list(
+        col = "norm_exp_swi", raw_col = "exp_swi",
+        raw_label = "Change in saltwater intrusion (m)",
+        description = "Projected saltwater migration in meters (Case-C)"
+      ),
+      "Storm Surge" = list(
+        col = "norm_exp_storm_surge", raw_col = "exp_storm_surge",
+        raw_label = "Change in storm surge (m)",
+        description = "Absolute change in storm surge in meters"
       )
     ),
     "Wildfire" = list(
@@ -121,26 +131,19 @@ indicator_config <- list(
         raw_label = "Scaled visitation trend",
         description = "Historic trend in park visitation (scaled)"
       ),
-      "Competition (Water Use Trend)" = list(
+      "Competition" = list(
         col = "norm_sen_competition", raw_col = "sen_competition",
         raw_label = "Water use trend slope (per km\u00b2)",
         description = "Trend in nearby county water use (competition for supply)"
       )
     ),
-    "Water Supply" = list(
-      "Water Supply Type" = list(
-        col = "norm_sen_water_supply_type", raw_col = "sen_water_supply_type",
-        raw_label = "Source type vulnerability (ordinal)",
-        description = "Water supply source type vulnerability rating"
-      )
-    ),
-    "Treatment" = list(
-      "Treatment Type" = list(
-        col = "norm_sen_treatment_type", raw_col = "sen_treatment_type",
-        raw_label = "Treatment level vulnerability (ordinal)",
-        description = "Water treatment level vulnerability rating"
-      )
-    ),
+    # "Water Supply" = list(
+    #   "Water Supply Type" = list(
+    #     col = "norm_sen_water_supply_type", raw_col = "sen_water_supply_type",
+    #     raw_label = "Source type vulnerability (ordinal)",
+    #     description = "Water supply source type vulnerability rating"
+    #   )
+    # ),
     "Wildfire" = list(
       "Current Wildfire Risk" = list(
         col = "norm_sen_wildfire_hazard", raw_col = "sen_wildfire_hazard",
@@ -175,13 +178,6 @@ indicator_config <- list(
         raw_label = "Mann-Kendall slope (40-yr precip)",
         description = "40-year historic trend in precipitation (Mann-Kendall slope)"
       )
-    ),
-    "SWE" = list(
-      "Historic SWE Trend" = list(
-        col = "norm_sen_swe_trend", raw_col = "sen_swe_trend",
-        raw_label = "Historic SWE trend",
-        description = "Historic trend in snow water equivalent"
-      )
     )
   )
 )
@@ -203,18 +199,16 @@ score_rank_cols <- list(
 factor_labels <- c(
   "factor_exp_runoff"       = "Runoff\n(Exp)",
   "factor_exp_precip"       = "Precip\n(Exp)",
-  "factor_exp_swe"          = "SWE\n(Exp)",
+  "factor_exp_drought"      = "Drought\n(Exp)",
   "factor_exp_slr"          = "SLR\n(Exp)",
   "factor_exp_wildfire"     = "Wildfire\n(Exp)",
   "factor_sen_demand"       = "Demand\n(Sen)",
-  "factor_sen_water_supply" = "Supply\n(Sen)",
-  "factor_sen_treatment"    = "Treatment\n(Sen)",
+  #"factor_sen_water_supply" = "Supply\n(Sen)",
   "factor_sen_wildfire"     = "Wildfire\n(Sen)",
   "factor_sen_flood"        = "Flood\n(Sen)",
   "factor_sen_slr"          = "SLR\n(Sen)",
   "factor_sen_runoff"       = "Runoff\n(Sen)",
-  "factor_sen_precip"       = "Precip\n(Sen)",
-  "factor_sen_swe"          = "SWE\n(Sen)"
+  "factor_sen_precip"       = "Precip\n(Sen)"
 )
 
 ###################### UI ###############################
@@ -442,7 +436,7 @@ ui <- fluidPage(
                        p(HTML("Water supplies in the <strong>top 25% of the current comparison group</strong>
           for overall vulnerability are flagged as
           <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
-          This threshold is recalculated relative to the active filter (CONUS, region, state, or park subset),
+          This threshold is recalculated relative to the active filter (CONUS, region, or state subset),
           so priority designations reflect the selected comparison group, not a fixed national threshold.
           Popups also display hazard-specific flags:
           <span class='badge-demo' style='background:#C05235;'>&#x1F525; Fire</span>
@@ -768,7 +762,7 @@ server <- function(input, output, session) {
     has_geo_filter <- input$filter_region != "" || input$filter_state != ""
     
     # Recalculate scores only for region/state filters, not park-level selections
-    if (has_geo_filter && nrow(df) >= 20) {
+    if (has_geo_filter) {
       geom <- st_geometry(df)
       df_recalc <- tryCatch(
         calc_vulnerability_index(as.data.frame(df)),
@@ -781,7 +775,7 @@ server <- function(input, output, session) {
     }
     
     # Apply priority filter AFTER recalculation so it reflects updated rankings
-    if (isTRUE(input$filter_priority)) df <- df %>% filter(priority_national == TRUE)
+    if (isTRUE(input$filter_priority)) df <- df %>% filter(priority_group == TRUE)
     
     df
   })
@@ -1029,8 +1023,8 @@ server <- function(input, output, session) {
     pal_dom <- if (is_rank) c(0, 100) else val_rng
     
     # Columns where lower raw values = higher vulnerability (invert color scale)
-    invert_raw_cols <- c("exp_runoff_change", "exp_precip_change", "exp_swe_change",
-                         "sen_runoff_trend", "sen_precip_trend", "sen_swe_trend")
+    invert_raw_cols <- c("exp_runoff_change", "exp_precip_change", "exp_drought_change",
+                         "sen_runoff_trend", "sen_precip_trend")
     is_inverted <- (input$view_mode == "indicator") && col %in% invert_raw_cols
     
     pal_colors <- if (is_inverted) {
@@ -1087,7 +1081,7 @@ server <- function(input, output, session) {
       raw_value = raw_vals, col_value = plot_vals,
       vuln_rank = df[["VULNERABILITY_rank"]],
       exp_rank = df[["EXPOSURE_rank"]], sen_rank = df[["SENSITIVITY_rank"]],
-      priority = df[["priority_national"]], flag_fire = df[["flag_fire"]],
+      priority = df[["priority_group"]], flag_fire = df[["flag_fire"]],
       flag_flood = df[["flag_flood"]], flag_slr = df[["flag_slr"]], flag_drought = df[["flag_drought"]],
       wsd_source_id = df[["wsd_source_id"]], park_unit = df[["park_unit"]],
       park_name = df[["park_name"]], water_system_name = df[["water_system_name"]],
@@ -1270,7 +1264,7 @@ server <- function(input, output, session) {
           exp_rank  = round(row$EXPOSURE_rank[1], 1),
           sen_rank  = round(row$SENSITIVITY_rank[1], 1),
           n         = nrow(scored_df),
-          priority  = isTRUE(row$priority_national[1])
+          priority  = isTRUE(row$priority_group[1])
         )
       }
       
@@ -1603,19 +1597,19 @@ server <- function(input, output, session) {
              any_of(names(factor_labels)),
              starts_with("norm_"),
              starts_with("exp_"), starts_with("sen_"),
-             priority_national, flag_fire, flag_flood, flag_slr, flag_drought) %>%
+             priority_group, flag_fire, flag_flood, flag_slr, flag_drought) %>%
       mutate(
         across(where(is.numeric), ~round(., 3)),
         # Build combined priority flags column
         priority_flags = paste0(
-          ifelse(!is.na(priority_national) & priority_national, "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>HIGH PRIORITY</span>", ""),
+          ifelse(!is.na(priority_group) & priority_group, "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>HIGH PRIORITY</span>", ""),
           ifelse(!is.na(flag_fire)    & flag_fire,    "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F525; Fire</span>", ""),
           ifelse(!is.na(flag_flood)   & flag_flood,   "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F4A7; Flood</span>", ""),
           ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F30A; SLR</span>", ""),
           ifelse(!is.na(flag_drought) & flag_drought,  "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x2600;&#xFE0F; Drought</span>", "")
         )
       ) %>%
-      select(-priority_national, -flag_fire, -flag_flood, -flag_slr, -flag_drought)
+      select(-priority_group, -flag_fire, -flag_flood, -flag_slr, -flag_drought)
     
     #vuln_max <- max(df$VULNERABILITY, na.rm = TRUE)
     
