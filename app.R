@@ -33,6 +33,10 @@ source("calc_vulnerability_index.R")
 # write_sf(parks_raw, "rapid_app/app_data/parks_simplified.gpkg")
 park_boundaries <- st_read("app_data/parks_simplified.gpkg")
 
+# read in municipal and hauled sources
+municipal_hauled <- st_read('app_data/municipal_hauled.gpkg') %>% 
+  select(park_name, park_unit, region, state, wsd_source_id, source_type)
+
 
 water_supplies <- read_csv("app_data/water_supplies.csv") %>%
   select(wsd_source_id, park_unit, park_name, region, state,
@@ -175,8 +179,8 @@ indicator_config <- list(
     "Precipitation" = list(
       "Historic Precipitation Trend" = list(
         col = "norm_sen_precip_trend", raw_col = "sen_precip_trend",
-        raw_label = "Mann-Kendall slope (40-yr precip)",
-        description = "40-year historic trend in precipitation (Mann-Kendall slope)"
+        raw_label = "Mann-Kendall slope (30-yr precip)",
+        description = "30-year historic trend in precipitation (Mann-Kendall slope)"
       )
     )
   )
@@ -895,15 +899,27 @@ server <- function(input, output, session) {
     )
   })
   
+  # Icon for municipal/hauled supplies 
+  tri_icon <- leaflegend::makeSymbol(
+    shape = "triangle",
+    width = 12,
+    color = "#1D3557",
+    fillColor = "black",
+    fillOpacity = 0.9,
+    opacity = 1
+  )
+  
   # ── Base map (once) ─────────────────────────────────────────────────────
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$OpenStreetMap, group = "OpenStreetMap") %>%
-      #addProviderTiles(providers$CartoDB.Voyager, group = "Terrain") %>% 
+      addProviderTiles(providers$Esri.WorldTopoMap, group = "Topo") %>% 
+      addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>% 
       setView(lng = -98.5, lat = 37, zoom = 5) %>%
       addMapPane("background", zIndex = 410) %>%
       addMapPane("markers",    zIndex = 450) %>%
       addMapPane("highlights", zIndex = 420) %>% 
+      addMapPane("m_h", zIndex = 420) %>% 
       addPolygons(
         data        = park_boundaries,
         group       = "Park Boundaries",
@@ -920,90 +936,29 @@ server <- function(input, output, session) {
           style     = list("font-weight" = "normal", "border" = "none",
                            "box-shadow" = "none", "background" = "transparent")
         )
-      ) #%>% 
-    # addLayersControl(#baseGroups = c("Terrain", "Light"),
-    #   overlayGroups = c("Park Boundaries"),
-    #                  options = layersControlOptions(collapsed = FALSE),
-    #                  position = "topleft") %>%
-    # hideGroup("Park Boundaries") #%>%
-    #   htmlwidgets::onRender("
-    #   function(el, x) {
-    #     var map = this;
-    #     var zoomThreshold = 7;
-    # 
-    #     var lightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    #       attribution: '&copy; OpenStreetMap &copy; CARTO',
-    #       subdomains: 'abcd',
-    #       maxZoom: 20
-    #     });
-    # 
-    #     var natgeoLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}', {
-    #       attribution: 'Tiles &copy; Esri &mdash; National Geographic',
-    #       maxZoom: 16
-    #     });
-    # 
-    #     // Remove the default tile layer added by R
-    #     map.eachLayer(function(l) {
-    #       if (l instanceof L.TileLayer) map.removeLayer(l);
-    #     });
-    # 
-    #     // Add the correct one based on starting zoom
-    #     lightLayer.addTo(map);
-    # 
-    #     function swapBasemap() {
-    #       var zoom = map.getZoom();
-    #       if (zoom >= zoomThreshold && map.hasLayer(lightLayer)) {
-    #         map.removeLayer(lightLayer);
-    #         natgeoLayer.addTo(map);
-    #         natgeoLayer.bringToBack();
-    #       } else if (zoom < zoomThreshold && map.hasLayer(natgeoLayer)) {
-    #         map.removeLayer(natgeoLayer);
-    #         lightLayer.addTo(map);
-    #         lightLayer.bringToBack();
-    #       }
-    #     }
-    # 
-    #     map.on('zoomend', swapBasemap);
-    #   }
-    # ")
-    
-  })
-  
-  # ── Park boundaries — with loading message ──────────────────────
-  # observeEvent(input$map_groups, {
-  #   if ("Park Boundaries" %in% input$map_groups) {
-  #     notif_id <- showNotification(
-  #       "Loading park boundaries...", duration = NULL, closeButton = FALSE, type = "message"
-  #     )
-  #     parks_loading(TRUE)
-  #     sess <- session
-  #     later::later(function() {
-  #       leafletProxy("map", session = session) %>%
-  #         addPolygons(
-  #           data        = parks_raw,
-  #           group       = "Park Boundaries",
-  #           fillColor   = "#A8DADC",
-  #           fillOpacity = 0.1,
-  #           color       = "#1D3557",
-  #           weight      = 1,
-  #           opacity     = 0.5,
-  #           options     = pathOptions(pane = "background"),
-  #           label       = ~UNIT_NAME,
-  #           labelOptions = labelOptions(
-  #             textsize  = "11px",
-  #             direction = "auto",
-  #             style     = list("font-weight" = "normal", "border" = "none",
-  #                              "box-shadow" = "none", "background" = "transparent")
-  #           )
-  #         )
-  #       parks_loading(FALSE)
-  #       removeNotification(notif_id, session = sess)
-  #     }, delay = 0)
-  #   } else {
-  #     leafletProxy("map", session = session) %>% clearGroup("Park Boundaries")
-  #   }
-  # }, ignoreNULL = FALSE)
-  # 
+      ) %>%
+      addMarkers(
+        data = municipal_hauled,
+        group = "Municipal/Hauled Supplies",
+        icon = leaflet::icons(iconUrl = tri_icon, iconWidth = 12, iconHeight = 12),
+        # radius = 5,
+        # fillColor = "black",
+        # fillOpacity = 0.75,
+        # stroke = FALSE,
+        popup = ~paste0(
+          "<b>Park Name:</b> ", park_name, "<br/>",
+          "<b>Park Unit:</b> ", park_unit, "<br/>",
+          "<b>Regiont:</b> ", region, "<br/>",
+          "<b>State:</b> ", state, "<br/>",
+          "<b>Source Type:</b> ", source_type
+        ),
+        options     = pathOptions(pane = "m_h")
+        ) %>% 
+    addLayersControl(baseGroups = c("OpenStreetMap", "Satellite", "Terrain"),
+                     overlayGroups = "Municipal/Hauled Supplies") %>% 
+      hideGroup("Municipal/Hauled Supplies")
+    })
+
   # ── Map markers ─────────────────────────────────────────────────────────
   observe({
     req(active_column())
@@ -1094,21 +1049,36 @@ server <- function(input, output, session) {
     ))
     
     leafletProxy("map") %>%
-      #clearMarkers() %>% clearControls() %>%
-      clearMarkers() %>% removeControl("legend") %>% clearGroup("highlight") %>%
-      addCircleMarkers(data = plot_data, radius = radius_vec, color = "#1D3557",
-                       fillColor = fill_vec, fillOpacity = 0.9,
-                       stroke = TRUE, weight = 1, popup = popup_vec,
-                       label = as.data.frame(plot_data)[["park_name"]],
-                       labelOptions = labelOptions(
-                         style = list("font-weight" = "normal", "font-size" = "12px"),
-                         textsize = "12px", direction = "auto"
-                       ),
-                       options = pathOptions(pane = "markers"),
-                       layerId = as.data.frame(plot_data)[["wsd_source_id"]]) %>%
-      addLegend(pal = pal, values = na.omit(vals), title = legend_title,
-                na.label = "No Data", position = "bottomright",
-                opacity = 1, layerId = "legend")
+      removeControl("legend") %>% 
+      clearGroup(c("data_points", "highlight")) %>%
+      addCircleMarkers(
+        data = plot_data,
+        group = "data_points",
+        radius = radius_vec,
+        color = "#1D3557",
+        fillColor = fill_vec,
+        fillOpacity = 0.9,
+        stroke = TRUE,
+        weight = 1,
+        popup = popup_vec,
+        label = as.data.frame(plot_data)[["park_name"]],
+        labelOptions = labelOptions(
+          style = list("font-weight" = "normal", "font-size" = "12px"),
+          textsize = "12px",
+          direction = "auto"
+        ),
+        options = pathOptions(pane = "markers"),
+        layerId = as.data.frame(plot_data)[["wsd_source_id"]]
+      ) %>%
+      addLegend(
+        pal = pal,
+        values = na.omit(vals),
+        title = legend_title,
+        na.label = "No Data",
+        position = "bottomright",
+        opacity = 1,
+        layerId = "legend"
+      )
   })
   
   # ── Factor score breakdown chart ────────────────────────────────────────
