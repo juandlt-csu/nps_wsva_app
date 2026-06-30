@@ -803,6 +803,9 @@ server <- function(input, output, session) {
     df
   })
   
+  # Debounce so panning doesn't re-render the table on every pixel of drag
+  map_bounds_debounced <- reactive({ input$map_bounds }) %>% debounce(400)
+  
   # ── Zoom to filtered extent ──────────────────────────────────────────────
   observeEvent(filtered_data(), {
     df <- filtered_data()
@@ -1055,6 +1058,36 @@ server <- function(input, output, session) {
                       raw_label = popup_rawlbl)
     ))
     
+    # force legend to show legend points sized and colored by var
+    breaks <- pretty(pal_dom, n = 5)
+    breaks <- breaks[breaks >= pal_dom[1] & breaks <= pal_dom[2]]
+    
+    legend_radius <- if (is_inverted) {
+      pmax(4, pmin(16, scales::rescale(breaks, to = c(16, 4), from = pal_dom)))
+    } else {
+      pmax(4, pmin(16, scales::rescale(breaks, to = c(4, 16), from = pal_dom)))
+    }
+    legend_colors <- pal(breaks)
+    
+    legend_rows <- paste0(
+      "<div style='display:flex;align-items:center;margin:3px 0;'>",
+      "<div style='width:", legend_radius * 2, "px;height:", legend_radius * 2, "px;",
+      "border-radius:50%;background:", legend_colors, ";border:1px solid #1D3557;",
+      "margin-right:8px;flex-shrink:0;'></div>",
+      "<span>", round(breaks, 2), "</span>",
+      "</div>",
+      collapse = ""
+    )
+    
+    legend_html <- paste0(
+      "<div style='background:white;padding:8px 10px;border-radius:6px;",
+      "box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:12px;max-width:180px;'>",
+      "<div style='font-weight:600;margin-bottom:6px;'>", gsub("\n", "<br/>", legend_title), "</div>",
+      legend_rows,
+      "</div>"
+    )
+    
+    # ADD DATA POINTS ------------
     leafletProxy("map") %>%
       removeControl("legend") %>% 
       clearGroup(c("data_points", "highlight")) %>%
@@ -1077,15 +1110,16 @@ server <- function(input, output, session) {
         options = pathOptions(pane = "markers"),
         layerId = as.data.frame(plot_data)[["wsd_source_id"]]
       ) %>%
-      addLegend(
-        pal = pal,
-        values = na.omit(vals),
-        title = legend_title,
-        na.label = "No Data",
-        position = "bottomright",
-        opacity = 1,
-        layerId = "legend"
-      )
+      addControl(html = legend_html, position = "bottomright", layerId = "legend")
+      # addLegend(
+      #   pal = pal,
+      #   values = na.omit(vals),
+      #   title = legend_title,
+      #   na.label = "No Data",
+      #   position = "bottomright",
+      #   opacity = 1,
+      #   layerId = "legend"
+      # )
   })
   
   # ── Factor score breakdown chart ────────────────────────────────────────
@@ -1565,7 +1599,16 @@ server <- function(input, output, session) {
   
   # ── Data table ──────────────────────────────────────────────────────────
   output$data_table <- renderDT(server = TRUE, {
-    df <- as.data.frame(filtered_data_display()) %>%
+    
+    req(map_bounds_debounced())
+    bounds <- map_bounds_debounced()
+    
+    base_data <- filtered_data_display()
+    coords    <- st_coordinates(base_data)
+    in_view   <- coords[, 1] >= bounds$west  & coords[, 1] <= bounds$east &
+      coords[, 2] >= bounds$south & coords[, 2] <= bounds$north
+    
+    df <- as.data.frame(base_data[in_view, ]) %>%
       select(wsd_source_id, park_unit, park_name, state, region,
              water_system_name, source_type,
              VULNERABILITY, VULNERABILITY_rank, EXPOSURE, EXPOSURE_rank,
