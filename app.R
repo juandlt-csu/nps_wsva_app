@@ -915,7 +915,7 @@ server <- function(input, output, session) {
       addProviderTiles(providers$OpenStreetMap, group = "OpenStreetMap") %>%
       addProviderTiles(providers$Esri.WorldTopoMap, group = "Topo") %>% 
       addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>% 
-      setView(lng = -98.5, lat = 37, zoom = 5) %>%
+      setView(lng = -98.5, lat = 37, zoom = 4) %>%
       addMapPane("background", zIndex = 410) %>%
       addMapPane("markers",    zIndex = 450) %>%
       addMapPane("highlights", zIndex = 420) %>% 
@@ -1022,12 +1022,19 @@ server <- function(input, output, session) {
     plot_vals <- df[[col]]
     raw_vals  <- if (is_ind && !is.null(raw_col_name)) df[[raw_col_name]] else rep(NA_real_, nrow(df))
     
+    # sort descending by the value driving radius, BEFORE building dependent vectors
+    ord       <- order(plot_vals, decreasing = TRUE)
+    plot_data <- plot_data[ord, ]
+    plot_vals <- plot_vals[ord]
+    raw_vals  <- raw_vals[ord]
+    df        <- df[ord, ]
+    
     radius_vec <- if (is_inverted) {
       ifelse(is.na(plot_vals), 3,
-             pmax(4, pmin(16, scales::rescale(plot_vals, to=c(16,4), from=pal_dom))))
+             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(12,2), from=pal_dom))))
     } else {
       ifelse(is.na(plot_vals), 3,
-             pmax(4, pmin(16, scales::rescale(plot_vals, to=c(4,16), from=pal_dom))))
+             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(2,12), from=pal_dom))))
     }
     fill_vec   <- pal(plot_vals)
     
@@ -1057,7 +1064,7 @@ server <- function(input, output, session) {
         radius = radius_vec,
         color = "#1D3557",
         fillColor = fill_vec,
-        fillOpacity = 0.9,
+        fillOpacity = 0.75,
         stroke = TRUE,
         weight = 1,
         popup = popup_vec,
