@@ -130,10 +130,10 @@ indicator_config <- list(
   
   "Sensitivity" = list(
     "Demand" = list(
-      "Historic Visitation Trend" = list(
+      "Historical Visitation Trend" = list(
         col = "norm_sen_visitation_trend", raw_col = "sen_visitation_trend",
         raw_label = "Scaled visitation trend",
-        description = "Historic trend in park visitation (scaled)"
+        description = "Historical trend in park visitation (scaled)"
       ),
       "Competition" = list(
         col = "norm_sen_competition", raw_col = "sen_competition",
@@ -170,17 +170,17 @@ indicator_config <- list(
       )
     ),
     "Runoff" = list(
-      "Historic Runoff Trend" = list(
+      "Historical Runoff Trend" = list(
         col = "norm_sen_runoff_trend", raw_col = "sen_runoff_trend",
         raw_label = "Mann-Kendall slope (30-yr runoff)",
-        description = "30-year historic trend in runoff (Mann-Kendall slope)"
+        description = "30-year historical trend in runoff (Mann-Kendall slope)"
       )
     ),
     "Precipitation" = list(
-      "Historic Precipitation Trend" = list(
+      "Historical Precipitation Trend" = list(
         col = "norm_sen_precip_trend", raw_col = "sen_precip_trend",
         raw_label = "Mann-Kendall slope (30-yr precip)",
-        description = "30-year historic trend in precipitation (Mann-Kendall slope)"
+        description = "30-year historical trend in precipitation (Mann-Kendall slope)"
       )
     )
   )
@@ -707,10 +707,14 @@ server <- function(input, output, session) {
   
   # ── Description pop-out modal ────────────────────────────────────────────
   observeEvent(input$show_description_btn, {
-    info <- input$show_description_btn
+    site_id <- input$show_description_btn
+    df_all  <- as.data.frame(filtered_data())
+    req(site_id %in% df_all$wsd_source_id)
+    desc_text <- df_all$description[df_all$wsd_source_id == site_id][1]
+    
     showModal(modalDialog(
-      title = paste0("System Description — ", info$id),
-      p(info$text, style = "font-size:1.5rem; line-height:1.6; color:#333;"),
+      title = paste0("System Description — ", site_id),
+      p(desc_text, style = "font-size:1.5rem; line-height:1.6; color:#333;"),
       easyClose = TRUE,
       footer = modalButton("Close")
     ))
@@ -756,31 +760,33 @@ server <- function(input, output, session) {
   # ── Filtered + recalculated data ────────────────────────────────────────
   # When a geographic filter is active, vulnerability scores are recalculated
   # within that subset so rankings are relative to the filtered group.
-  filtered_data <- reactive({
+  geo_recalculated_data <- reactive({
     df <- combined_data
-    
     if (input$filter_region != "") df <- df %>% filter(region == input$filter_region)
     if (input$filter_state  != "") df <- df %>% filter(state  == input$filter_state)
-    if (length(input$filter_park) > 0) df <- df %>% filter(park_unit %in% input$filter_park)
     
     has_geo_filter <- input$filter_region != "" || input$filter_state != ""
-    
-    # Recalculate scores only for region/state filters, not park-level selections
     if (has_geo_filter) {
       geom <- st_geometry(df)
       df_recalc <- tryCatch(
         calc_vulnerability_index(as.data.frame(df)),
         error = function(e) {
-          message("Score recalculation failed (subset too small or low variance): ", e$message)
+          showNotification(
+            "Score recalculation failed for this selection due to low sample size — showing national scores instead.",
+            type = "error", duration = NULL
+          )
           as.data.frame(df)
         }
       )
       df <- st_sf(df_recalc, geometry = geom)
     }
-    
-    # Apply priority filter AFTER recalculation so it reflects updated rankings
+    df
+  })
+  
+  filtered_data <- reactive({
+    df <- geo_recalculated_data()
+    if (length(input$filter_park) > 0) df <- df %>% filter(park_unit %in% input$filter_park)
     if (isTRUE(input$filter_priority)) df <- df %>% filter(priority_group == TRUE)
-    
     df
   })
   
@@ -1196,50 +1202,105 @@ server <- function(input, output, session) {
   
   # ── Popup button → modal with site chart ────────────────────────────────
   observeEvent(input$show_chart_btn, {
-    site_id <- input$show_chart_btn
-    df_all  <- as.data.frame(filtered_data())
+    site_id  <- input$show_chart_btn
+    df_all   <- as.data.frame(filtered_data())
     req(site_id %in% df_all$wsd_source_id)
     
+    mean_base <- as.data.frame(geo_recalculated_data())
     site_row  <- df_all[df_all$wsd_source_id == site_id, ]
-    fac_cols  <- names(factor_labels)[names(factor_labels) %in% names(df_all)]
-    means     <- colMeans(df_all[, fac_cols, drop = FALSE], na.rm = TRUE)
+    
+    indicator_order <- c("wildfire", "flood", "slr", "runoff", "precip", "drought", "demand")
+    
+    fac_cols_all <- names(factor_labels)[names(factor_labels) %in% names(df_all)]
+    sen_cols <- fac_cols_all[grepl("_sen_", fac_cols_all)]
+    exp_cols <- fac_cols_all[grepl("_exp_", fac_cols_all)]
+    
+    order_by_indicator <- function(cols) {
+      ind <- sub("^factor_(exp|sen)_", "", cols)
+      cols[order(match(ind, indicator_order))]
+    }
+    sen_cols <- order_by_indicator(sen_cols)
+    exp_cols <- order_by_indicator(exp_cols)
+    fac_cols <- c(sen_cols, exp_cols)   # Sensitivity block first, Exposure second
+    
+    means     <- colMeans(mean_base[, fac_cols, drop = FALSE], na.rm = TRUE)
     site_vals <- as.numeric(site_row[1, fac_cols])
-    bar_order <- factor_labels[fac_cols]
+    component <- ifelse(fac_cols %in% exp_cols, "Exposure", "Sensitivity")
     
-    chart_df <- data.frame(
-      factor    = factor(bar_order, levels = bar_order),
-      regional  = round(means, 3),
-      site      = round(site_vals, 3),
-      component = ifelse(grepl("Exp", bar_order), "Exposure", "Sensitivity")
-    )
+    # factor_labels stores literal "\n" (backslash + n), not a real newline —
+    # fixed = TRUE strips it as plain text, no regex escaping needed
+    indicator_label <- factor_labels[fac_cols]
+    indicator_label <- gsub("\n(Exp)", "", indicator_label, fixed = TRUE)
+    indicator_label <- gsub("\n(Sen)", "", indicator_label, fixed = TRUE)
     
-    site_title <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
+    site_title  <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
+    scope_label <- if (input$filter_state != "") {
+      paste("State:", input$filter_state)
+    } else if (input$filter_region != "") {
+      paste("Region:", input$filter_region)
+    } else {
+      "National (CONUS)"
+    }
+    site_color <- ifelse(component == "Exposure", "#457B9D", "#C05235")
     
-    p <- plot_ly(chart_df, x = ~factor) %>%
-      add_bars(y = ~regional, name = "Regional Mean",
+    category_key <- paste0(component, "|", indicator_label)  # unique, never shown directly
+    
+    p <- plot_ly() %>%
+      add_bars(x = list(component, indicator_label), y = means,
+               name = paste0(scope_label, " Mean"),
                marker = list(color = "rgba(180,180,180,0.5)"),
-               hovertemplate = "%{x}<br>Regional mean: %{y:.3f}<extra></extra>") %>%
-      add_bars(y = ~site, name = "Selected Site",
-               marker = list(color = ifelse(chart_df$component == "Exposure", "#457B9D", "#C05235")),
-               hovertemplate = "%{x}<br>Site score: %{y:.3f}<extra></extra>") %>%
+               hovertemplate = "%{x}<br>Mean: %{y:.3f}<extra></extra>") %>%
+      add_bars(x = list(component, indicator_label), y = site_vals,
+               name = "Selected Site", marker = list(color = site_color),
+               hovertemplate = "%{x}<br>Site score: %{y:.3f}<extra></extra>",
+               showlegend = FALSE) %>%
+      add_trace(type = "bar", x = list(NA), y = list(NA), name = "Selected Site Sensitivity",
+                marker = list(color = "#C05235"), hoverinfo = "none") %>%
+      add_trace(type = "bar", x = list(NA), y = list(NA), name = "Selected Site Exposure",
+                marker = list(color = "#457B9D"), hoverinfo = "none") %>%
       layout(
         barmode = "group",
         title   = list(text = site_title, font = list(size = 13, color = "#1D3557"),
                        x = 0, xanchor = "left"),
-        xaxis   = list(title = "", tickfont = list(size = 10),
-                       categoryorder = "array", categoryarray = bar_order),
-        yaxis   = list(title = "Score (0-1)", range = c(0, 1), tickfont = list(size = 10)),
+        xaxis   = list(title = "", tickfont = list(size = 10)),
+        yaxis   = list(title = "Normalized Score (0-1)", range = c(0, 1), tickfont = list(size = 10)),
         margin  = list(t = 35, b = 60),
         legend  = list(orientation = "h", y = -0.25),
         plot_bgcolor  = "white",
         paper_bgcolor = "white"
       )
     
+    # showModal(modalDialog(
+    #   title = NULL,
+    #   renderPlotly(p),
+    #   tags$p(paste0("\u24d8 Scores reflect relative vulnerability for: ", scope_label),
+    #          style = "font-size:14px; color:#888; margin-top:4px; margin-bottom:0;"),
+    #   size      = "l",
+    #   easyClose = TRUE,
+    #   footer    = modalButton("Close")
+    # ))
     showModal(modalDialog(
       title = NULL,
       renderPlotly(p),
-      tags$p("\u24d8 Regional values representative of the currently filtered selection",
-             style = "font-size:11px; color:#888; margin-top:4px; margin-bottom:0;"),
+      tags$script(HTML("
+    (function() {
+      var attempts = 0;
+      function boldGroupLabels() {
+        var found = false;
+        document.querySelectorAll('.modal-body svg text').forEach(function(el) {
+          if (el.textContent === 'Sensitivity' || el.textContent === 'Exposure') {
+            el.style.fontWeight = 'bold';
+            found = true;
+          }
+        });
+        attempts++;
+        if (!found && attempts < 10) setTimeout(boldGroupLabels, 200);
+      }
+      setTimeout(boldGroupLabels, 200);
+    })();
+  ")),
+      tags$p(paste0("\u24d8 Scores reflect relative vulnerability for: ", scope_label),
+             style = "font-size:12px; color:#4f4f4f; margin-top:4px; margin-bottom:0;"),
       size      = "l",
       easyClose = TRUE,
       footer    = modalButton("Close")
@@ -1723,11 +1784,11 @@ server <- function(input, output, session) {
       "<b>Source Type:</b> ",     ifelse(is.na(source_type), "<span style='color:#999;'>N/A</span>", source_type), "<br>",
       "<b>State:</b> ",           state,           "<br>",
       if (!is.na(description) && nchar(trimws(description)) > 0)
-        paste0("<a href='#' onclick=\"Shiny.setInputValue('show_description_btn', {id:'",
-               wsd_source_id, "', text: '", gsub("'", "\\'", description, fixed = TRUE), "'}, ",
-               "{priority:'event'}); return false;\" ",
+        paste0("<a href='#' onclick=\"Shiny.setInputValue('show_description_btn', '",
+               wsd_source_id, "', {priority:'event'}); return false;\" ",
                "style='font-size:11px; color:#457B9D;'>&#x1F4C4; View Full Description</a><br>")
-      else "",
+      else paste0("<span style='font-size:11px; color:#999; font-style:italic;'>",
+                  "No water supply description available.</span><br>"),
       "<hr style='margin:6px 0; border-color:#ddd;'>",
       "<button onclick=\"Shiny.setInputValue('show_chart_btn', '", wsd_source_id,
       "', {priority: 'event'});\" ",
