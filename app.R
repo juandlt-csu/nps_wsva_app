@@ -69,20 +69,20 @@ indicator_config <- list(
     "Runoff" = list(
       "Change in Runoff" = list(
         col = "norm_exp_runoff_change", raw_col = "exp_runoff_change",
-        raw_label = "% change mean annual runoff (p10)",
-        description = "Projected % change in mean annual runoff (p10)"
+        raw_label = "% change mean annual runoff (10th percentile of all models)",
+        description = "Projected % change in mean annual runoff (10th percentile of all models)"
       ),
       "Runoff Model Agreement" = list(
         col = "norm_exp_runoff_model_agree", raw_col = "exp_runoff_model_agree",
-        raw_label = "% GCMs predicting decrease",
-        description = "% of GCMs predicting a decrease in runoff"
+        raw_label = "% models predicting decrease",
+        description = "% of climate models predicting a decrease in runoff"
       )
     ),
     "Precipitation" = list(
       "Change in Precipitation" = list(
         col = "norm_exp_precip_change", raw_col = "exp_precip_change",
-        raw_label = "% change mean annual precip (p10)",
-        description = "Projected % change in mean annual precipitation (p10)"
+        raw_label = "% change mean annual precip (10th percentile of all models)",
+        description = "Projected % change in mean annual precipitation (10th percentile of all models)"
       ),
       "Precipitation Model Agreement" = list(
         col = "norm_exp_precip_model_agree", raw_col = "exp_precip_model_agree",
@@ -122,8 +122,8 @@ indicator_config <- list(
     "Wildfire" = list(
       "Change in Fire Probability" = list(
         col = "norm_exp_fire_prob_change", raw_col = "exp_fire_prob_change",
-        raw_label = "% change fire probability (p90)",
-        description = "Projected % change in probability of wildfire (p90)"
+        raw_label = "% change fire probability (90th percentile of all models)",
+        description = "Projected % change in probability of wildfire (90th percentile of all models)"
       )
     )
   ),
@@ -187,9 +187,9 @@ indicator_config <- list(
 )
 
 score_views <- list(
-  "Vulnerability Score" = "VULNERABILITY",
-  "Exposure Score"      = "EXPOSURE",
-  "Sensitivity Score"   = "SENSITIVITY"
+  "Relative Vulnerability Score" = "VULNERABILITY",
+  "Relative Exposure Score"      = "EXPOSURE",
+  "Relative Sensitivity Score"   = "SENSITIVITY"
 )
 
 # Mapping from score name to its rank column
@@ -284,6 +284,11 @@ ui <- fluidPage(
         display:inline-block; color:white; padding:2px 7px;
         border-radius:3px; font-size:0.75rem; margin-right:4px; vertical-align:middle;
       }
+      
+      #how_to_details[open] .how-to-chevron { transform: rotate(180deg); }
+      #how_to_details[open] #how_to_hint { display: none; }
+      #how_to_details summary::-webkit-details-marker { display: none; }
+      #how_to_details summary::marker { display: none; }
 
       /* ── View mode toggle tabs ── */
       .view-toggle-wrap {
@@ -387,17 +392,35 @@ ui <- fluidPage(
   div(class = "control-panel",
       
       # Collapsible how-to box
-      tags$details(class = "info-box", style = "cursor:pointer;",
-                   tags$summary(style = "font-size:1.5rem; font-weight:600; color:#1D3557; list-style:none;",
-                                icon("info-circle"), " How to Use This Tool",
-                                icon("chevron-down", style = "float:right; font-size:1rem; margin-top:5px;")
+      tags$details(class = "info-box", id = "how_to_details", style = "cursor:pointer;",
+                   tags$summary(
+                     style = paste0(
+                       "font-size:1.3rem; font-weight:700; color:white; list-style:none;",
+                       "background:#1D3557; border-radius:6px; padding:10px 16px;",
+                       "display:flex; align-items:center; justify-content:space-between;",
+                       "user-select:none;"
+                     ),
+                     tags$span(
+                       icon("info-circle", style = "margin-right:8px;"),
+                       "How to Use This Tool",
+                       tags$span(
+                         id = "how_to_hint",
+                         style = "font-size:1.15rem; font-weight:400; color:#A8DADC; margin-left:10px; font-style:italic",
+                         "click to expand"
+                       )
+                     ),
+                     tags$span(
+                       class = "how-to-chevron",
+                       style = "font-size:0.9rem; transition: transform 0.2s ease;",
+                       icon("chevron-down")
+                     )
                    ),
                    div(style = "margin-top:12px;",
                        p(HTML("This tool visualizes water supply vulnerability across the National Park System
           using a framework modeled after <a href='https://conbio.onlinelibrary.wiley.com/doi/10.1111/con4.70020' target='_blank' style='color:#457B9D;'>Michalak et al. 2026</a>. Each water supply is scored
           on two components &mdash; <strong style='color:#457B9D;'>Exposure</strong> (projected climate threats)
           and <strong style='color:#C05235;'>Sensitivity</strong> (current susceptibility) &mdash;
-          which combine into an overall <strong style='color:#386150;'>Vulnerability Score</strong>.
+          which combine into an overall <strong style='color:#386150;'>Relative Vulnerability Score</strong>.
           Larger, darker circles indicate higher vulnerability.")),
                        div(style = "background:white; border-radius:8px; padding:14px 18px; margin:10px 0 6px 0; border:1px solid #dce8ef;",
                            p(style = "font-size:1.2rem; color:#555; margin-bottom:10px;",
@@ -430,15 +453,15 @@ ui <- fluidPage(
             Both are recalculated whenever a region, state, or park filter is applied, so
             a supply flagged as High Priority within a filtered view may not hold that designation nationally.")),
                            div(style = "background:#fff8e6; border-left:3px solid #8B6914; border-radius:4px; padding:8px 12px; margin-top:6px;",
-                               p(style = "font-size:1.2rem; color:#5a4a1a; margin:0;",
+                               p(style = "font-size:1.4rem; color:#5a4a1a; margin:0;",
                                  HTML("<b>&#x26A0;&#xFE0F; Scores are relative, not absolute.</b>
                 A score only has meaning within the group it is compared against.
                 The same water supply may rank differently depending on whether it is evaluated
                 across CONUS, a region, a state, or a subset of parks. Use filters intentionally to ensure comparisons are meaningful.")))
                        ),
                        div(class = "info-section-title", icon("exclamation-triangle"), " Priority & Hazard Flags"),
-                       p(HTML("Water supplies in the <strong>top 25% of the current comparison group</strong>
-          for overall vulnerability are flagged as
+                       p(HTML("Water supplies in the <strong>top 25% vulnerability score of the current comparison group</strong>
+          are flagged as
           <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
           This threshold is recalculated relative to the active filter (CONUS, region, or state subset),
           so priority designations reflect the selected comparison group, not a fixed national threshold.
@@ -456,9 +479,9 @@ ui <- fluidPage(
           # Toggle buttons (JS-driven, sets hidden input)
           tags$div(class = "view-toggle-wrap",
                    tags$button(id = "btn_score", class = "view-toggle-btn active",
-                               onclick = "setViewMode('score')", "Score View"),
+                               onclick = "setViewMode('score')", "Relative Vulnerability Score"),
                    tags$button(id = "btn_indicator", class = "view-toggle-btn",
-                               onclick = "setViewMode('indicator')", "Specific Indicator")
+                               onclick = "setViewMode('indicator')", "Raw Indicator Values")
           ),
           
           # Hidden input read by server
@@ -482,7 +505,7 @@ ui <- fluidPage(
                          selectInput("score_view",
                                      label = tags$span("Score", style = "color:#386150; font-weight:600;"),
                                      choices = names(score_views),
-                                     selected = "Vulnerability Score")
+                                     selected = "Relative Vulnerability Score")
                   ),
                   column(4,
                          selectInput("score_metric",
@@ -498,7 +521,7 @@ ui <- fluidPage(
           conditionalPanel(
             condition = "input.view_mode == 'indicator'",
             div(class = "view-card ind-card",
-                div(class = "view-card-label", HTML("&#x1F50D; Drill into a specific indicator")),
+                div(class = "view-card-label", HTML("&#x1F50D; Drill into raw indicator values")),
                 fluidRow(
                   column(3,
                          selectInput("component",
@@ -532,7 +555,7 @@ ui <- fluidPage(
         column(6,
                div(class = "filter-section-label", HTML("&#x1F4CD; Geographic Filter"),
                    tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:1.2rem;",
-                             "(region/state recalculates scores)")),
+                             "(filtering recalculates scores)")),
                fluidRow(
                  column(4,
                         selectInput("filter_region",
@@ -1221,53 +1244,74 @@ server <- function(input, output, session) {
     }
     sen_cols <- order_by_indicator(sen_cols)
     exp_cols <- order_by_indicator(exp_cols)
-    fac_cols <- c(sen_cols, exp_cols)   # Sensitivity block first, Exposure second
     
-    means     <- colMeans(mean_base[, fac_cols, drop = FALSE], na.rm = TRUE)
+    fac_cols <- c(rev(sen_cols), rev(exp_cols))
+    n        <- length(fac_cols)
+    ypos     <- seq_len(n)
+    n_sen    <- length(sen_cols)
+    
+    clean_label <- function(cols) {
+      lab <- factor_labels[cols]
+      lab <- gsub("\n(Exp)", "", lab, fixed = TRUE)
+      lab <- gsub("\n(Sen)", "", lab, fixed = TRUE)
+      # tag component so duplicate indicator names stay distinct in the label text
+      paste0(unname(lab), ifelse(cols %in% exp_cols, " (E)", " (S)"))
+    }
+    y_text <- clean_label(fac_cols)
+    
+    mean_vals <- colMeans(mean_base[, fac_cols, drop = FALSE], na.rm = TRUE)
     site_vals <- as.numeric(site_row[1, fac_cols])
-    component <- ifelse(fac_cols %in% exp_cols, "Exposure", "Sensitivity")
     
-    # factor_labels stores literal "\n" (backslash + n), not a real newline —
-    # fixed = TRUE strips it as plain text, no regex escaping needed
-    indicator_label <- factor_labels[fac_cols]
-    indicator_label <- gsub("\n(Exp)", "", indicator_label, fixed = TRUE)
-    indicator_label <- gsub("\n(Sen)", "", indicator_label, fixed = TRUE)
+    # Above group mean = more vulnerable than peers (red); below = less (grey-blue)
+    above     <- !is.na(site_vals) & site_vals >= mean_vals
+    conn_col  <- ifelse(above, "#C05235", "#9DB8C9")
     
     site_title  <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
-    scope_label <- if (input$filter_state != "") {
-      paste("State:", input$filter_state)
-    } else if (input$filter_region != "") {
-      paste("Region:", input$filter_region)
-    } else {
-      "National (CONUS)"
-    }
-    site_color <- ifelse(component == "Exposure", "#457B9D", "#C05235")
+    scope_label <- if (input$filter_state != "") paste("State:", input$filter_state)
+    else if (input$filter_region != "") paste("Region:", input$filter_region)
+    else "National (CONUS)"
     
-    category_key <- paste0(component, "|", indicator_label)  # unique, never shown directly
+    # Build one connector line per factor (mean -> site)
+    conn_shapes <- lapply(seq_len(n), function(i) {
+      if (is.na(site_vals[i])) return(NULL)
+      list(type = "line", xref = "x", yref = "y",
+           x0 = mean_vals[i], x1 = site_vals[i], y0 = ypos[i], y1 = ypos[i],
+           line = list(color = conn_col[i], width = 3))
+    })
+    conn_shapes <- Filter(Negate(is.null), conn_shapes)
     
     p <- plot_ly() %>%
-      add_bars(x = list(component, indicator_label), y = means,
-               name = paste0(scope_label, " Mean"),
-               marker = list(color = "rgba(180,180,180,0.5)"),
-               hovertemplate = "%{x}<br>Mean: %{y:.3f}<extra></extra>") %>%
-      add_bars(x = list(component, indicator_label), y = site_vals,
-               name = "Selected Site", marker = list(color = site_color),
-               hovertemplate = "%{x}<br>Site score: %{y:.3f}<extra></extra>",
-               showlegend = FALSE) %>%
-      add_trace(type = "bar", x = list(NA), y = list(NA), name = "Selected Site Sensitivity",
-                marker = list(color = "#C05235"), hoverinfo = "none") %>%
-      add_trace(type = "bar", x = list(NA), y = list(NA), name = "Selected Site Exposure",
-                marker = list(color = "#457B9D"), hoverinfo = "none") %>%
+      # Group mean marker (hollow reference)
+      add_trace(
+        x = mean_vals, y = ypos, type = "scatter", mode = "markers",
+        name = paste0(scope_label, " Mean"),
+        marker = list(color = "white", size = 9, symbol = "line-ns-open",
+                      line = list(color = "#888", width = 2)),
+        hovertemplate = paste0("%{text}<br>Group mean: %{x:.3f}<extra></extra>"),
+        text = y_text
+      ) %>%
+      # Site value dot (absolute position); colored by above/below mean
+      add_trace(
+        x = site_vals, y = ypos, type = "scatter", mode = "markers+text",
+        name = "Selected Site",
+        marker = list(color = conn_col, size = 13,
+                      line = list(color = "white", width = 1.5)),
+        text = sprintf("%.2f", site_vals), textposition = "middle right",
+        textfont = list(size = 10, color = "#333"),
+        hovertemplate = paste0("%{text2}<br>Site: %{x:.3f}<extra></extra>"),
+        text2 = y_text
+      ) %>%
       layout(
-        barmode = "group",
-        title   = list(text = site_title, font = list(size = 13, color = "#1D3557"),
-                       x = 0, xanchor = "left"),
-        xaxis   = list(title = "", tickfont = list(size = 10)),
-        yaxis   = list(title = "Normalized Score (0-1)", range = c(0, 1), tickfont = list(size = 10)),
-        margin  = list(t = 35, b = 60),
-        legend  = list(orientation = "h", y = -0.25),
-        plot_bgcolor  = "white",
-        paper_bgcolor = "white"
+        shapes = conn_shapes,
+        title = list(text = site_title, font = list(size = 13, color = "#1D3557"),
+                     x = 0, xanchor = "left"),
+        xaxis = list(title = "Normalized Score (0\u20131)", range = c(-0.05, 1.12),
+                     tickfont = list(size = 10), zeroline = FALSE),
+        yaxis = list(title = "", tickmode = "array", tickvals = ypos, ticktext = y_text,
+                     tickfont = list(size = 10), range = c(0.4, n + 0.6)),
+        margin = list(t = 35, l = 10, r = 20, b = 40),
+        legend = list(orientation = "h", y = -0.12),
+        plot_bgcolor = "white", paper_bgcolor = "white"
       )
     
     # showModal(modalDialog(
@@ -1743,26 +1787,38 @@ server <- function(input, output, session) {
              round(col_value, 3), "</span>")
     } else {
       raw_row <- if (!is.na(raw_value)) {
-        paste0("<b>", raw_label, ":</b> <span style='font-size:13px; font-weight:bold;'>",
-               round(raw_value, 3), "</span>")
+        paste0(
+          "<div style='margin-top:6px; padding:8px 10px; background:#edf3f8; border-left:3px solid #1D3557; border-radius:4px;'>",
+          "<span style='font-size:10px; color:#666; text-transform:uppercase; letter-spacing:0.05em;'>", raw_label, "</span><br>",
+          "<span style='font-size:18px; font-weight:800; color:#1D3557;'>", round(raw_value, 3), "</span>",
+          "</div>"
+        )
       } else {
-        paste0("<b>", raw_label, ":</b> <span style='color:#999;'>No data</span>")
+        paste0(
+          "<div style='margin-top:6px; padding:8px 10px; background:#f5f5f5; border-left:3px solid #ccc; border-radius:4px;'>",
+          "<span style='font-size:10px; color:#666; text-transform:uppercase; letter-spacing:0.05em;'>", raw_label, "</span><br>",
+          "<span style='font-size:13px; color:#999; font-style:italic;'>No data</span>",
+          "</div>"
+        )
       }
       paste0("<b style='color:#1D3557; font-size:14px;'>", indicator_name, "</b><br>",
              "<span style='font-size:11px; color:#666;'>", component, " \u203a ", factor_name,
-             "</span><br>", raw_row)
+             "</span>", raw_row)
     }
     
-    score_section <- paste0(
-      "<hr style='margin:6px 0; border-color:#ddd;'>",
-      "<table style='font-size:11px; width:100%;'><tr>",
-      "<td><b>Vulnerability</b></td><td><b>Exposure</b></td><td><b>Sensitivity</b></td>",
-      "</tr><tr>",
-      "<td style='color:#386150; font-weight:bold;'>", round(vuln_rank, 1), "%</td>",
-      "<td style='color:#457B9D; font-weight:bold;'>", round(exp_rank, 1), "%</td>",
-      "<td style='color:#C05235; font-weight:bold;'>", round(sen_rank, 1), "%</td>",
-      "</tr></table>",
-      "<span style='font-size:9px; color:#999;'>Percentile rank (higher = more vulnerable)</span>")
+    score_section <- if (view_mode == "score") {
+      paste0(
+        "<hr style='margin:6px 0; border-color:#ddd;'>",
+        "<table style='font-size:11px; width:100%;'><tr>",
+        "<td><b>Vulnerability</b></td><td><b>Exposure</b></td><td><b>Sensitivity</b></td>",
+        "</tr><tr>",
+        "<td style='color:#386150; font-weight:bold;'>", round(vuln_rank, 1), "%</td>",
+        "<td style='color:#457B9D; font-weight:bold;'>", round(exp_rank, 1), "%</td>",
+        "<td style='color:#C05235; font-weight:bold;'>", round(sen_rank, 1), "%</td>",
+        "</tr></table>",
+        "<span style='font-size:9px; color:#999;'>Percentile rank (higher = more vulnerable)</span>"
+      )
+    } else ""
     
     flags <- c(
       if (isTRUE(priority))    "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>HIGH PRIORITY</span>" else NULL,
