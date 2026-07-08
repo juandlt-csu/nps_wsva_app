@@ -205,13 +205,13 @@ factor_labels <- c(
   "factor_exp_runoff"       = "Runoff\n(Exp)",
   "factor_exp_precip"       = "Precip\n(Exp)",
   "factor_exp_drought"      = "Drought\n(Exp)",
-  "factor_exp_slr"          = "SLR\n(Exp)",
+  "factor_exp_slr"          = "Sea Level Rise\n(Exp)",
   "factor_exp_wildfire"     = "Wildfire\n(Exp)",
   "factor_sen_demand"       = "Demand\n(Sen)",
   #"factor_sen_water_supply" = "Supply\n(Sen)",
   "factor_sen_wildfire"     = "Wildfire\n(Sen)",
   "factor_sen_flood"        = "Flood\n(Sen)",
-  "factor_sen_slr"          = "SLR\n(Sen)",
+  "factor_sen_slr"          = "Sea Level Rise\n(Sen)",
   "factor_sen_runoff"       = "Runoff\n(Sen)",
   "factor_sen_precip"       = "Precip\n(Sen)"
 )
@@ -471,7 +471,7 @@ ui <- fluidPage(
           Popups also display hazard-specific flags:
           <span class='badge-demo' style='background:#C05235;'>&#x1F525; Fire</span>
           <span class='badge-demo' style='background:#457B9D;'>&#x1F4A7; Flood</span>
-          <span class='badge-demo' style='background:#1D3557;'>&#x1F30A; SLR</span>
+          <span class='badge-demo' style='background:#1D3557;'>&#x1F30A; Sea Level Rise</span>
           <span class='badge-demo' style='background:#8B6914;'>&#x2600;&#xFE0F; Drought</span>"))
                    )
       ),
@@ -1196,187 +1196,245 @@ server <- function(input, output, session) {
                        options = pathOptions(pane = "highlights"))
   })
   
+  ## Score contribution chart -------------
   observeEvent(input$show_chart_btn, {
     site_id <- input$show_chart_btn
     df_all  <- as.data.frame(filtered_data())
     req(site_id %in% df_all$wsd_source_id)
     
     site_row <- df_all[df_all$wsd_source_id == site_id, ]
+    site_row <- site_row[1, , drop = FALSE]
     src_type <- site_row$source_type[1]
     is_rainwater <- !is.na(src_type) && src_type == "rainwater"
     
-    EXP_COLOR <- "#5B8C6E"   # sage green   - Exposure
-    SEN_COLOR <- "#7C6FAD"   # muted purple - Sensitivity
-    NA_COLOR  <- "#c9c9c9"   # neutral grey - N/A or missing (never a scored value)
-    
-    # Each factor's true composition, from calc_vulnerability_index.R:
-    #   "single"    - factor IS the raw indicator, nothing to split
-    #   "euclidean" - factor = sqrt(sum(indicator_i^2)) -- a real Euclidean
-    #                 combination, so indicator-level shares are well-defined
-    #   "blended"   - factor = (1 - change) * model_agreement_pct -- a
-    #                 multiplicative weighting, NOT a sum of squares, so it
-    #                 CANNOT be split into "X% from this, Y% from that"
-    #                 without misrepresenting the math. Shown as one bar,
-    #                 flagged with an asterisk.
-    factor_defs <- list(
-      list(id="factor_exp_runoff",   comp="Exposure",    label="Runoff",   type="blended",
-           raw_cols=c("exp_runoff_change","exp_runoff_model_agree")),
-      list(id="factor_exp_precip",   comp="Exposure",    label="Precip",   type="blended",
-           raw_cols=c("exp_precip_change","exp_precip_model_agree")),
-      list(id="factor_exp_drought",  comp="Exposure",    label="Drought",  type="blended",
-           raw_cols=c("exp_drought_change","exp_drought_model_agree")),
-      list(id="factor_exp_slr",      comp="Exposure",    label="SLR",      type="euclidean",
-           indicators=list(
-             list(norm_col="norm_exp_inundation_slr", raw_col="exp_inundation_slr", label="Inundation"),
-             list(norm_col="norm_exp_swi",             raw_col="exp_swi",           label="Saltwater Intrusion"),
-             list(norm_col="norm_exp_storm_surge",     raw_col="exp_storm_surge",   label="Storm Surge")
-           )),
-      list(id="factor_exp_wildfire", comp="Exposure",    label="Wildfire", type="single",
-           raw_cols=c("exp_fire_prob_change")),
-      list(id="factor_sen_demand",   comp="Sensitivity", label="Demand",   type="euclidean",
-           indicators=list(
-             list(norm_col="norm_sen_visitation_trend", raw_col="sen_visitation_trend", label="Visitation Trend"),
-             list(norm_col="norm_sen_competition",       raw_col="sen_competition",      label="Competition")
-           )),
-      list(id="factor_sen_wildfire", comp="Sensitivity", label="Wildfire", type="single", raw_cols=c("sen_wildfire_hazard")),
-      list(id="factor_sen_flood",    comp="Sensitivity", label="Flood",    type="single", raw_cols=c("sen_flood_risk")),
-      list(id="factor_sen_slr",      comp="Sensitivity", label="SLR",      type="single", raw_cols=c("sen_inundation_current")),
-      list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single", raw_cols=c("sen_runoff_trend")),
-      list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single", raw_cols=c("sen_precip_trend"))
-    )
-    
-    fmt_raw <- function(x) {
-      x <- suppressWarnings(as.numeric(x))
-      if (any(is.na(x))) return(NA_character_)
-      paste(vapply(x, function(v) formatC(v, format = "g", digits = 3), character(1)), collapse = " / ")
-    }
-    
-    # Builds every bar row for one component. Factor-level contribution % is
-    # computed exactly as before (against the real factor_* columns, matching
-    # calc_vulnerability_index.R's own EXPOSURE/SENSITIVITY calculation).
-    # "euclidean" factors then get that same % share re-split across their
-    # indicators, proportional to each indicator's squared normalized value --
-    # this is a nested share (factor's overall share, divided up), not an
-    # independent re-derivation from raw indicators.
-    build_component_rows <- function(comp_name) {
-      defs     <- Filter(function(d) d$comp == comp_name, factor_defs)
-      fac_cols <- vapply(defs, function(d) d$id, character(1))
-      vals     <- as.numeric(site_row[1, fac_cols])
-      contrib  <- 100 * vals^2 / sum(vals^2, na.rm = TRUE)
-      suffix   <- if (comp_name == "Exposure") " (E)" else " (S)"
-      
-      rows <- list()
-      for (i in seq_along(defs)) {
-        d <- defs[[i]]
-        na_flag <- (grepl("runoff", d$id) &  is_rainwater) |
-          (grepl("precip", d$id) & !is_rainwater)
-        status  <- if (na_flag) "n/a" else if (is.na(vals[i])) "missing" else "scored"
-        
-        if (d$type == "euclidean" && status == "scored") {
-          norm_vals <- vapply(d$indicators, function(ind) site_row[[ind$norm_col]][1], numeric(1))
-          shares    <- norm_vals^2 / sum(norm_vals^2, na.rm = TRUE)
-          nested    <- shares * contrib[i]
-          for (j in seq_along(d$indicators)) {
-            ind <- d$indicators[[j]]
-            raw <- fmt_raw(site_row[[ind$raw_col]][1])
-            rows[[length(rows) + 1]] <- data.frame(
-              display_label = paste0(ind$label, suffix),
-              status = "scored", contrib = nested[j],
-              bar_text = sprintf("%.0f%% \u00b7 raw: %s", nested[j], raw),
-              stringsAsFactors = FALSE
-            )
-          }
-        } else {
-          lbl <- paste0(d$label, suffix, if (d$type == "blended") "*" else "")
-          bar_text <- if (status == "scored") {
-            sprintf("%.0f%% \u00b7 raw: %s", contrib[i], fmt_raw(site_row[1, d$raw_cols]))
-          } else if (status == "n/a") "N/A for this system type" else "No data available"
-          rows[[length(rows) + 1]] <- data.frame(
-            display_label = lbl, status = status,
-            contrib = if (status == "scored") contrib[i] else NA_real_,
-            bar_text = bar_text, stringsAsFactors = FALSE
-          )
-        }
-      }
-      d_out <- do.call(rbind, rows)
-      d_out$component <- comp_name
-      status_rank <- match(d_out$status, c("scored", "n/a", "missing"))
-      d_out[order(status_rank, -ifelse(is.na(d_out$contrib), -Inf, d_out$contrib)), ]
-    }
-    
-    # Exposure block first, Sensitivity block second == top-to-bottom in the
-    # rendered chart (categoryarray below reverses this, matching the
-    # confirmed-working convention from the previous version).
-    fac_df <- rbind(build_component_rows("Exposure"), build_component_rows("Sensitivity"))
-    fac_df$bar_x <- ifelse(fac_df$status == "scored", fac_df$contrib, 0)
-    
-    exp_mask <- fac_df$component == "Exposure"    & fac_df$status == "scored"
-    sen_mask <- fac_df$component == "Sensitivity" & fac_df$status == "scored"
-    na_mask  <- fac_df$status != "scored"
+    EXP_COLOR  <- "#5B8C6E"
+    SEN_COLOR  <- "#7C6FAD"
+    VULN_COLOR <- "#C05235"
+    IND_COLOR  <- "#B7B7B7"
+    NA_COLOR   <- "#c9c9c9"
     
     site_title  <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
     scope_label <- if (input$filter_state != "") paste("State:", input$filter_state)
     else if (input$filter_region != "") paste("Region:", input$filter_region)
     else "National (CONUS)"
     
-    p <- plot_ly() %>%
-      add_trace(
-        x = fac_df$bar_x[exp_mask], y = fac_df$display_label[exp_mask],
-        type = "bar", orientation = "h", name = "Exposure",
-        marker = list(color = EXP_COLOR, line = list(color = "rgba(0,0,0,0.1)", width = 0.5)),
-        text = fac_df$bar_text[exp_mask], textposition = "outside",
-        textfont = list(size = 10.5, color = "#444"),
-        hovertemplate = paste0(fac_df$display_label[exp_mask], "<br>", fac_df$bar_text[exp_mask], "<extra></extra>")
-      ) %>%
-      add_trace(
-        x = fac_df$bar_x[sen_mask], y = fac_df$display_label[sen_mask],
-        type = "bar", orientation = "h", name = "Sensitivity",
-        marker = list(color = SEN_COLOR, line = list(color = "rgba(0,0,0,0.1)", width = 0.5)),
-        text = fac_df$bar_text[sen_mask], textposition = "outside",
-        textfont = list(size = 10.5, color = "#444"),
-        hovertemplate = paste0(fac_df$display_label[sen_mask], "<br>", fac_df$bar_text[sen_mask], "<extra></extra>")
-      ) %>%
-      add_trace(
-        x = fac_df$bar_x[na_mask], y = fac_df$display_label[na_mask],
-        type = "bar", orientation = "h", name = "N/A / no data",
-        marker = list(color = NA_COLOR),
-        text = fac_df$bar_text[na_mask], textposition = "outside",
-        textfont = list(size = 10.5, color = "#999"),
-        hovertemplate = paste0(fac_df$display_label[na_mask], "<br>", fac_df$bar_text[na_mask], "<extra></extra>")
-      ) %>%
+    # -----------------------------------------------------------------
+    # Shared factor definitions (used by both tabs)
+    # -----------------------------------------------------------------
+    factor_defs <- list(
+      list(id="factor_exp_runoff",   comp="Exposure",    label="Runoff",   type="single"),
+      list(id="factor_exp_precip",   comp="Exposure",    label="Precip",   type="single"),
+      list(id="factor_exp_drought",  comp="Exposure",    label="Drought",  type="single"),
+      list(id="factor_exp_slr",      comp="Exposure",    label="Sea Level Rise",      type="euclidean",
+           indicators=list(
+             list(norm_col="norm_exp_inundation_slr", label="Inundation"),
+             list(norm_col="norm_exp_swi",             label="Saltwater Intrusion"),
+             list(norm_col="norm_exp_storm_surge",     label="Storm Surge")
+           )),
+      list(id="factor_exp_wildfire", comp="Exposure",    label="Wildfire", type="single"),
+      list(id="factor_sen_demand",   comp="Sensitivity", label="Demand",   type="euclidean",
+           indicators=list(
+             list(norm_col="norm_sen_visitation_trend", label="Visitation Trend"),
+             list(norm_col="norm_sen_competition",       label="Competition")
+           )),
+      list(id="factor_sen_wildfire", comp="Sensitivity", label="Wildfire", type="single"),
+      list(id="factor_sen_flood",    comp="Sensitivity", label="Flood",    type="single"),
+      list(id="factor_sen_slr",      comp="Sensitivity", label="Sea Level Rise",      type="single"),
+      list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single"),
+      list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single")
+    )
+    na_flag_for <- function(id) (grepl("runoff", id) & is_rainwater) | (grepl("precip", id) & !is_rainwater)
+    
+    # ===================================================================
+    # TAB 1: "Component Contribution" -- factor-level bar chart
+    # ===================================================================
+    build_hover <- function(d, header) {
+      if (d$type == "euclidean") {
+        norm_vals <- vapply(d$indicators, function(ind) site_row[[ind$norm_col]][1], numeric(1))
+        shares <- round(100 * norm_vals^2 / sum(norm_vals^2, na.rm = TRUE))
+        lines <- vapply(seq_along(d$indicators), function(j) {
+          sprintf("%s: %d%%", d$indicators[[j]]$label, shares[j])
+        }, character(1))
+        paste(c(header, lines), collapse = "<br>")
+      } else {
+        paste(c(header, "(Single Indicator)"), collapse = "<br>")
+      }
+    }
+    
+    build_component_df <- function(comp_name) {
+      defs     <- Filter(function(d) d$comp == comp_name, factor_defs)
+      fac_cols <- vapply(defs, function(d) d$id, character(1))
+      vals     <- as.numeric(site_row[1, fac_cols])
+      contrib  <- 100 * vals^2 / sum(vals^2, na.rm = TRUE)
+      suffix   <- if (comp_name == "Exposure") " (E)" else " (S)"
+      
+      rows <- lapply(seq_along(defs), function(i) {
+        d <- defs[[i]]
+        status  <- if (na_flag_for(d$id)) "n/a" else if (is.na(vals[i])) "missing" else "scored"
+        lbl     <- paste0(d$label, suffix)
+        if (status == "scored") {
+          header   <- sprintf("%s \u2014 %.0f%%", lbl, contrib[i])
+          hover    <- build_hover(d, header)
+          bar_text <- sprintf("%.0f%%", contrib[i])
+        } else {
+          hover    <- if (status == "n/a") paste0(lbl, "<br>N/A for this system type")
+          else paste0(lbl, "<br>No data available")
+          bar_text <- if (status == "n/a") "N/A for this system type" else "No data available"
+        }
+        data.frame(display_label = lbl, status = status,
+                   contrib = if (status == "scored") contrib[i] else NA_real_,
+                   bar_text = bar_text, hover = hover,
+                   component = comp_name, stringsAsFactors = FALSE)
+      })
+      d_out <- do.call(rbind, rows)
+      status_rank <- match(d_out$status, c("scored", "n/a", "missing"))
+      d_out[order(status_rank, -ifelse(is.na(d_out$contrib), -Inf, d_out$contrib)), ]
+    }
+    
+    fac_df <- rbind(build_component_df("Exposure"), build_component_df("Sensitivity"))
+    fac_df$bar_x <- ifelse(fac_df$status == "scored", fac_df$contrib, 0)
+    exp_mask <- fac_df$component == "Exposure"    & fac_df$status == "scored"
+    sen_mask <- fac_df$component == "Sensitivity" & fac_df$status == "scored"
+    na_mask  <- fac_df$status != "scored"
+    
+    p_bars <- plot_ly() %>%
+      add_trace(x = fac_df$bar_x[exp_mask], y = fac_df$display_label[exp_mask],
+                type = "bar", orientation = "h", name = "Exposure",
+                marker = list(color = EXP_COLOR, line = list(color = "rgba(0,0,0,0.1)", width = 0.5)),
+                text = fac_df$bar_text[exp_mask], textposition = "outside",
+                textfont = list(size = 10.5, color = "#444"),
+                hovertemplate = paste0(fac_df$hover[exp_mask], "<extra></extra>")) %>%
+      add_trace(x = fac_df$bar_x[sen_mask], y = fac_df$display_label[sen_mask],
+                type = "bar", orientation = "h", name = "Sensitivity",
+                marker = list(color = SEN_COLOR, line = list(color = "rgba(0,0,0,0.1)", width = 0.5)),
+                text = fac_df$bar_text[sen_mask], textposition = "outside",
+                textfont = list(size = 10.5, color = "#444"),
+                hovertemplate = paste0(fac_df$hover[sen_mask], "<extra></extra>")) %>%
+      add_trace(x = fac_df$bar_x[na_mask], y = fac_df$display_label[na_mask],
+                type = "bar", orientation = "h", name = "N/A / no data",
+                marker = list(color = NA_COLOR),
+                text = fac_df$bar_text[na_mask], textposition = "outside",
+                textfont = list(size = 10.5, color = "#999"),
+                hovertemplate = paste0(fac_df$hover[na_mask], "<extra></extra>")) %>%
       layout(
         title = list(
-          text = paste0(
-            site_title,
-            "<br><span style='font-size:11px;color:#888;font-weight:400;'>",
-            "% share of Exposure / Sensitivity score \u00b7 ", scope_label, "</span>"
-          ),
-          font = list(size = 14, color = "#1D3557"), x = 0, xanchor = "left"
-        ),
+          text = paste0(site_title,
+                        "<br><span style='font-size:11px;color:#888;font-weight:400;'>",
+                        "% share of Exposure / Sensitivity score \u00b7 ", scope_label,
+                        " \u00b7 hover a bar for its indicator breakdown</span>"),
+          font = list(size = 14, color = "#1D3557"), x = 0, xanchor = "left"),
         xaxis = list(title = list(text = "% Contribution to Component Score", standoff = 15),
-                     range = c(0, 118), tickfont = list(size = 10), zeroline = FALSE, gridcolor = "#eee"),
+                     range = c(0, 112), tickfont = list(size = 10), zeroline = FALSE, gridcolor = "#eee"),
         yaxis = list(title = "", tickfont = list(size = 11),
                      categoryorder = "array", categoryarray = rev(fac_df$display_label)),
-        margin = list(t = 60, l = 10, r = 20, b = 100),
-        legend = list(orientation = "h", y = -0.3, font = list(size = 11)),
-        height = 520,
-        bargap = 0.25,
-        plot_bgcolor = "white", paper_bgcolor = "white"
+        margin = list(t = 60, l = 10, r = 20, b = 70),
+        legend = list(orientation = "h", y = -0.22, font = list(size = 11)),
+        bargap = 0.3, plot_bgcolor = "white", paper_bgcolor = "white"
       )
     
+    # ===================================================================
+    # TAB 2: "All Levels Contribution" -- Indicator -> Factor -> Component
+    # -> Vulnerability, as a nested icicle chart (indicators on the left,
+    # Vulnerability on the right, via tiling$flip="x"). safe_div guards
+    # two real zero-denominator cases found in the data (a site with
+    # SENSITIVITY==0 exactly, and vector-numerator division where ifelse()
+    # silently truncates to the length of its test argument -- do not use
+    # ifelse() for this, use the mask-assignment form instead).
+    # -----------------------------------------------------------------
+    safe_div <- function(num, den) { out <- num / den; out[den == 0] <- 0; out }
+    
+    ic_ids <- character(0); ic_labels <- character(0); ic_parents <- character(0)
+    ic_values <- numeric(0); ic_colors <- character(0)
+    ic_add <- function(id, label, parent, value, color) {
+      ic_ids     <<- c(ic_ids, id)
+      ic_labels  <<- c(ic_labels, label)
+      ic_parents <<- c(ic_parents, parent)
+      ic_values  <<- c(ic_values, value)
+      ic_colors  <<- c(ic_colors, color)
+    }
+    
+    exp_defs <- Filter(function(d) d$comp == "Exposure", factor_defs)
+    sen_defs <- Filter(function(d) d$comp == "Sensitivity", factor_defs)
+    exp_vals <- as.numeric(site_row[1, sapply(exp_defs, function(d) d$id)])
+    sen_vals <- as.numeric(site_row[1, sapply(sen_defs, function(d) d$id)])
+    exp_denom <- sum(exp_vals^2, na.rm = TRUE)
+    sen_denom <- sum(sen_vals^2, na.rm = TRUE)
+    vuln_denom <- site_row$EXPOSURE[1]^2 + site_row$SENSITIVITY[1]^2
+    exp_share_vuln <- 100 * safe_div(site_row$EXPOSURE[1]^2, vuln_denom)
+    sen_share_vuln <- 100 * safe_div(site_row$SENSITIVITY[1]^2, vuln_denom)
+    
+    ic_add("Vulnerability", "Vulnerability", "", 100, VULN_COLOR)
+    ic_add("Exposure", "Exposure", "Vulnerability", exp_share_vuln, EXP_COLOR)
+    ic_add("Sensitivity", "Sensitivity", "Vulnerability", sen_share_vuln, SEN_COLOR)
+    
+    ic_place_component <- function(defs, vals, denom, comp_id, comp_share_vuln, color) {
+      scored <- !sapply(defs, function(d) na_flag_for(d$id)) & !is.na(vals)
+      for (i in seq_along(defs)) {
+        if (!scored[i]) next
+        d <- defs[[i]]
+        suffix <- if (comp_id == "Exposure") " (E)" else " (S)"
+        lbl <- paste0(d$label, suffix)
+        fid <- paste0(comp_id, "/", lbl)
+        factor_share <- safe_div(vals[i]^2, denom)
+        factor_vuln  <- factor_share * comp_share_vuln
+        ic_add(fid, lbl, comp_id, factor_vuln, color)
+        if (d$type == "euclidean") {
+          norm_vals <- vapply(d$indicators, function(ind) site_row[[ind$norm_col]][1], numeric(1))
+          ind_share <- safe_div(norm_vals^2, sum(norm_vals^2, na.rm = TRUE))
+          for (j in seq_along(d$indicators)) {
+            ind <- d$indicators[[j]]
+            ic_add(paste0(fid, "/", ind$label), ind$label, fid, ind_share[j] * factor_vuln, IND_COLOR)
+          }
+        }
+      }
+    }
+    ic_place_component(exp_defs, exp_vals, exp_denom, "Exposure",    exp_share_vuln, EXP_COLOR)
+    ic_place_component(sen_defs, sen_vals, sen_denom, "Sensitivity", sen_share_vuln, SEN_COLOR)
+    
+    ic_text <- sprintf("%s<br>%.1f%%", ic_labels, ic_values)
+    
+    p_icicle <- plot_ly(
+      type = "icicle", ids = ic_ids, labels = ic_labels, parents = ic_parents,
+      values = ic_values, branchvalues = "total",
+      text = ic_text, textinfo = "text", textfont = list(size = 13),
+      hovertemplate = paste0(ic_text, "<extra></extra>"),
+      marker = list(colors = ic_colors, line = list(width = 1, color = "white")),
+      tiling = list(orientation = "h", flip = "x")
+    ) %>% layout(
+      title = list(text = paste0(site_title, " \u00b7 ", scope_label), font = list(size = 13, color = "#1D3557")),
+      margin = list(t = 40, l = 10, r = 10, b = 10)
+    )
+    
+    # ===================================================================
+    # Modal with both tabs
+    # ===================================================================
     showModal(modalDialog(
       title = NULL,
-      renderPlotly(p),
-      tags$p(
-        HTML(paste0(
-          "Bars show each indicator's <b>share of this site's Exposure or Sensitivity score</b> ",
-          "(not its raw magnitude) &mdash; calculated relative to the current comparison group: ",
-          "<b>", scope_label, "</b>. Grey bars are not scored: either not applicable to this ",
-          "water system's source type, or no data currently available for this location. ",
-          "<span style='color:#888;'>* Runoff/Precip/Drought (Exposure) combine a climate-change ",
-          "value with a model-agreement weight and can't be split into separate indicator shares.</span>"
-        )),
-        style = "font-size:11.5px; color:#4f4f4f; margin-top:6px; margin-bottom:0;"
+      tabsetPanel(
+        tabPanel("Component Contribution",
+                 renderPlotly(p_bars),
+                 tags$p(
+                   HTML(paste0(
+                     "Bars show each factor's <b>share of this site's Exposure or Sensitivity score</b> ",
+                     "&mdash; calculated relative to the current comparison group: <b>", scope_label, "</b>. ",
+                     "Hover a bar to see its underlying indicator(s). Grey bars are not scored: either not ",
+                     "applicable to this water system's source type, or no data currently available."
+                   )),
+                   style = "font-size:11.5px; color:#4f4f4f; margin-top:6px; margin-bottom:0;"
+                 )
+        ),
+        tabPanel("All Levels Contribution",
+                 renderPlotly(p_icicle),
+                 tags$p(
+                   HTML(paste0(
+                     "Nested boxes show each item's <b>share of ", site_title, "'s overall Vulnerability score</b>, ",
+                     "from raw indicators (left) through factors and components to the final index (right). ",
+                     "Hover any box for its exact percentage. Only scored indicators/factors are shown; see the ",
+                     "Component Contribution tab for N/A and missing-data flags."
+                   )),
+                   style = "font-size:11.5px; color:#4f4f4f; margin-top:6px; margin-bottom:0;"
+                 )
+        )
       ),
       size      = "l",
       easyClose = TRUE,
@@ -1446,7 +1504,7 @@ server <- function(input, output, session) {
       flags <- c(
         if (isTRUE(site_scored$flag_fire[1]))    "\U0001F525 Fire"    else NULL,
         if (isTRUE(site_scored$flag_flood[1]))   "\U0001F4A7 Flood"   else NULL,
-        if (isTRUE(site_scored$flag_slr[1]))     "\U0001F30A SLR"     else NULL,
+        if (isTRUE(site_scored$flag_slr[1]))     "\U0001F30A Sea Level Rise"     else NULL,
         if (isTRUE(site_scored$flag_drought[1])) "\u2600\uFE0F Drought" else NULL
       )
       
@@ -1531,7 +1589,7 @@ server <- function(input, output, session) {
       
       ### Hazard Flags HTML ----
       flag_colors <- c("\U0001F525 Fire" = "#C05235", "\U0001F4A7 Flood" = "#457B9D",
-                       "\U0001F30A SLR" = "#1D3557", "\u2600\uFE0F Drought" = "#8B6914")
+                       "\U0001F30A Sea Level Rise" = "#1D3557", "\u2600\uFE0F Drought" = "#8B6914")
       flags_html <- if (length(flags) > 0) {
         badges <- sapply(flags, function(f) {
           col <- ifelse(f %in% names(flag_colors), flag_colors[f], "#666")
@@ -1763,7 +1821,7 @@ server <- function(input, output, session) {
           ifelse(!is.na(priority_group) & priority_group, "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>HIGH PRIORITY</span>", ""),
           ifelse(!is.na(flag_fire)    & flag_fire,    "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F525; Fire</span>", ""),
           ifelse(!is.na(flag_flood)   & flag_flood,   "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F4A7; Flood</span>", ""),
-          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F30A; SLR</span>", ""),
+          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F30A; Sea Level Rise</span>", ""),
           ifelse(!is.na(flag_drought) & flag_drought,  "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x2600;&#xFE0F; Drought</span>", "")
         )
       ) %>%
@@ -1857,7 +1915,7 @@ server <- function(input, output, session) {
       if (isTRUE(priority))    "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>HIGH PRIORITY</span>" else NULL,
       if (isTRUE(flag_fire))   "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F525; Fire</span>"   else NULL,
       if (isTRUE(flag_flood))  "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F4A7; Flood</span>"  else NULL,
-      if (isTRUE(flag_slr))    "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F30A; SLR</span>"    else NULL,
+      if (isTRUE(flag_slr))    "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F30A; Sea Level Rise</span>"    else NULL,
       if (isTRUE(flag_drought)) "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x2600;&#xFE0F; Drought</span>" else NULL
     )
     flag_section <- if (length(flags) > 0)
