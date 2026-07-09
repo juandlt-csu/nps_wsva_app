@@ -1036,10 +1036,10 @@ server <- function(input, output, session) {
     
     radius_vec <- if (is_inverted) {
       ifelse(is.na(plot_vals), 3,
-             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(12,2), from=pal_dom))))
+             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(15,5), from=pal_dom))))
     } else {
       ifelse(is.na(plot_vals), 3,
-             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(2,12), from=pal_dom))))
+             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(5,15), from=pal_dom))))
     }
     fill_vec   <- pal(plot_vals)
     
@@ -1065,9 +1065,9 @@ server <- function(input, output, session) {
     breaks <- breaks[breaks >= pal_dom[1] & breaks <= pal_dom[2]]
     
     legend_radius <- if (is_inverted) {
-      pmax(4, pmin(16, scales::rescale(breaks, to = c(16, 4), from = pal_dom)))
+      pmax(4, pmin(16, scales::rescale(breaks, to = c(15, 5), from = pal_dom)))
     } else {
-      pmax(4, pmin(16, scales::rescale(breaks, to = c(4, 16), from = pal_dom)))
+      pmax(4, pmin(16, scales::rescale(breaks, to = c(5, 15), from = pal_dom)))
     }
     legend_colors <- pal(breaks)
     
@@ -1219,7 +1219,11 @@ server <- function(input, output, session) {
     else "National (CONUS)"
     
     # -----------------------------------------------------------------
-    # Shared factor definitions (used by both tabs)
+    # Shared factor definitions (used by both tabs). safe_div guards
+    # two real zero-denominator cases found in the data (a site with
+    # SENSITIVITY==0 exactly, and vector-numerator division where ifelse()
+    # silently truncates to the length of its test argument -- do not use
+    # ifelse() for this, use the mask-assignment form instead).
     # -----------------------------------------------------------------
     factor_defs <- list(
       list(id="factor_exp_runoff",   comp="Exposure",    label="Runoff",   type="single"),
@@ -1245,6 +1249,10 @@ server <- function(input, output, session) {
     )
     na_flag_for <- function(id) (grepl("runoff", id) & is_rainwater) | (grepl("precip", id) & !is_rainwater)
     
+    
+    safe_div <- function(num, den) { out <- num / den; out[den == 0] <- 0; out }
+    
+    
     # ===================================================================
     # TAB 1: "Component Contribution" -- factor-level bar chart
     # ===================================================================
@@ -1265,7 +1273,7 @@ server <- function(input, output, session) {
       defs     <- Filter(function(d) d$comp == comp_name, factor_defs)
       fac_cols <- vapply(defs, function(d) d$id, character(1))
       vals     <- as.numeric(site_row[1, fac_cols])
-      contrib  <- 100 * vals^2 / sum(vals^2, na.rm = TRUE)
+      contrib  <- 100 * safe_div(vals^2, sum(vals^2, na.rm = TRUE))
       suffix   <- if (comp_name == "Exposure") " (E)" else " (S)"
       
       rows <- lapply(seq_along(defs), function(i) {
@@ -1335,14 +1343,9 @@ server <- function(input, output, session) {
     # ===================================================================
     # TAB 2: "All Levels Contribution" -- Indicator -> Factor -> Component
     # -> Vulnerability, as a nested icicle chart (indicators on the left,
-    # Vulnerability on the right, via tiling$flip="x"). safe_div guards
-    # two real zero-denominator cases found in the data (a site with
-    # SENSITIVITY==0 exactly, and vector-numerator division where ifelse()
-    # silently truncates to the length of its test argument -- do not use
-    # ifelse() for this, use the mask-assignment form instead).
+    # Vulnerability on the right, via tiling$flip="x"). 
     # -----------------------------------------------------------------
-    safe_div <- function(num, den) { out <- num / den; out[den == 0] <- 0; out }
-    
+
     ic_ids <- character(0); ic_labels <- character(0); ic_parents <- character(0)
     ic_values <- numeric(0); ic_colors <- character(0)
     ic_add <- function(id, label, parent, value, color) {
@@ -1479,6 +1482,8 @@ server <- function(input, output, session) {
       national_df <- as.data.frame(combined_data)
       national    <- extract_ranks(national_df, site_id)
       
+      site_scored <- national_df[national_df$wsd_source_id == site_id, ]
+      
       ### Regional, State & Park Ranks (Recalculated) ----
       regional <- if (nrow(combined_raw[combined_raw$region == site_region, ]) >= 2) {
         extract_ranks(calc_vulnerability_index(combined_raw[combined_raw$region == site_region, ]), site_id)
@@ -1492,49 +1497,223 @@ server <- function(input, output, session) {
         extract_ranks(calc_vulnerability_index(combined_raw[combined_raw$park_unit == site_park, ]), site_id)
       } else { list(vuln_rank = NA, exp_rank = NA, sen_rank = NA, n = 1, priority = NA) }
       
-      ### Bar Chart Data ----
-      site_scored <- national_df[national_df$wsd_source_id == site_id, ]
-      fac_cols    <- names(factor_labels)[names(factor_labels) %in% names(national_df)]
-      nat_means   <- colMeans(national_df[, fac_cols, drop = FALSE], na.rm = TRUE)
-      site_vals   <- as.numeric(site_scored[1, fac_cols])
-      bar_labels  <- factor_labels[fac_cols]
-      components  <- ifelse(grepl("exp", fac_cols), "Exposure", "Sensitivity")
+      ### Component Contribution & All Levels Contribution Charts (Base64 PNG) ----
+      # Static counterparts of the two interactive charts in the score
+      # breakdown popup (same underlying math, same colors), since the
+      # report embeds images rather than live Plotly widgets. National
+      # scope throughout, matching the rank table above -- NOT whatever
+      # map filter happens to be active when the button is clicked, so the
+      # report is reproducible regardless of transient UI state.
+      EXP_COLOR <- "#5B8C6E"; SEN_COLOR <- "#7C6FAD"; VULN_COLOR <- "#C05235"
+      IND_COLOR <- "#B7B7B7"; CHART_NA_COLOR <- "#c9c9c9"
+      is_rainwater <- !is.na(site_meta$source_type[1]) && site_meta$source_type[1] == "rainwater"
       
-      ### Hazard Flags ----
-      flags <- c(
-        if (isTRUE(site_scored$flag_fire[1]))    "\U0001F525 Fire"    else NULL,
-        if (isTRUE(site_scored$flag_flood[1]))   "\U0001F4A7 Flood"   else NULL,
-        if (isTRUE(site_scored$flag_slr[1]))     "\U0001F30A Sea Level Rise"     else NULL,
-        if (isTRUE(site_scored$flag_drought[1])) "\u2600\uFE0F Drought" else NULL
+      rpt_factor_defs <- list(
+        list(id="factor_exp_runoff",   comp="Exposure",    label="Runoff",   type="single"),
+        list(id="factor_exp_precip",   comp="Exposure",    label="Precip",   type="single"),
+        list(id="factor_exp_drought",  comp="Exposure",    label="Drought",  type="single"),
+        list(id="factor_exp_slr",      comp="Exposure",    label="Sea Level Rise", type="euclidean",
+             indicators=list(
+               list(norm_col="norm_exp_inundation_slr", label="Inundation"),
+               list(norm_col="norm_exp_swi",             label="Saltwater Intrusion"),
+               list(norm_col="norm_exp_storm_surge",     label="Storm Surge")
+             )),
+        list(id="factor_exp_wildfire", comp="Exposure",    label="Wildfire", type="single"),
+        list(id="factor_sen_demand",   comp="Sensitivity", label="Demand",   type="euclidean",
+             indicators=list(
+               list(norm_col="norm_sen_visitation_trend", label="Visitation Trend"),
+               list(norm_col="norm_sen_competition",       label="Competition")
+             )),
+        list(id="factor_sen_wildfire", comp="Sensitivity", label="Wildfire", type="single"),
+        list(id="factor_sen_flood",    comp="Sensitivity", label="Flood",    type="single"),
+        list(id="factor_sen_slr",      comp="Sensitivity", label="Sea Level Rise", type="single"),
+        list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single"),
+        list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single")
       )
+      rpt_na_flag_for <- function(id) (grepl("runoff", id) & is_rainwater) | (grepl("precip", id) & !is_rainwater)
+      rpt_safe_div <- function(num, den) { out <- num / den; out[den == 0] <- 0; out }
       
-      ### Generate Chart (Base64 PNG) ----
-      chart_df <- data.frame(
-        factor    = factor(bar_labels, levels = bar_labels),
-        score     = site_vals,
-        component = components,
-        stringsAsFactors = FALSE
-      )
+      #### Component Contribution bar chart ----
+      rpt_build_component_df <- function(comp_name) {
+        defs     <- Filter(function(d) d$comp == comp_name, rpt_factor_defs)
+        fac_cols <- vapply(defs, function(d) d$id, character(1))
+        vals     <- as.numeric(site_scored[1, fac_cols])
+        contrib  <- 100 * rpt_safe_div(vals^2, sum(vals^2, na.rm = TRUE))
+        suffix   <- if (comp_name == "Exposure") " (E)" else " (S)"
+        rows <- lapply(seq_along(defs), function(i) {
+          d <- defs[[i]]
+          status <- if (rpt_na_flag_for(d$id)) "n/a" else if (is.na(vals[i])) "missing" else "scored"
+          data.frame(display_label = paste0(d$label, suffix), status = status,
+                     contrib = if (status == "scored") contrib[i] else NA_real_,
+                     component = comp_name, stringsAsFactors = FALSE)
+        })
+        d_out <- do.call(rbind, rows)
+        status_rank <- match(d_out$status, c("scored", "n/a", "missing"))
+        d_out[order(status_rank, -ifelse(is.na(d_out$contrib), -Inf, d_out$contrib)), ]
+      }
       
-      site_fill <- ifelse(components == "Exposure", "#457B9D", "#C05235")
+      contrib_df <- rbind(rpt_build_component_df("Exposure"), rpt_build_component_df("Sensitivity"))
+      contrib_df$bar_x <- ifelse(contrib_df$status == "scored", contrib_df$contrib, 0)
+      contrib_df$fill_color <- ifelse(contrib_df$status != "scored", CHART_NA_COLOR,
+                                      ifelse(contrib_df$component == "Exposure", EXP_COLOR, SEN_COLOR))
+      contrib_df$bar_label <- ifelse(contrib_df$status == "scored", sprintf("%.0f%%", contrib_df$contrib),
+                                     ifelse(contrib_df$status == "n/a", "N/A", "No data"))
+      contrib_df$order_key <- with(contrib_df,
+                                   ifelse(component == "Exposure", 1, 2) * 1000 - ifelse(is.na(bar_x), 0, bar_x))
+      contrib_df <- contrib_df[order(contrib_df$order_key), ]
+      contrib_df$display_label <- factor(contrib_df$display_label, levels = rev(contrib_df$display_label))
       
-      p <- ggplot2::ggplot(chart_df, ggplot2::aes(x = factor, y = score, fill = factor)) +
+      p_contrib <- ggplot2::ggplot(contrib_df, ggplot2::aes(x = display_label, y = bar_x, fill = fill_color)) +
         ggplot2::geom_col(width = 0.65) +
-        ggplot2::scale_fill_manual(values = setNames(site_fill, bar_labels), guide = "none") +
-        ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0, 0.05))) +
-        ggplot2::labs(x = NULL, y = "Score (0-1)") +
+        ggplot2::geom_text(ggplot2::aes(label = bar_label), hjust = -0.1, size = 3.2, color = "#333333") +
+        ggplot2::scale_fill_identity() +
+        ggplot2::scale_y_continuous(limits = c(0, max(contrib_df$bar_x, na.rm = TRUE) * 1.25),
+                                    expand = c(0, 0)) +
+        ggplot2::coord_flip() +
+        ggplot2::labs(x = NULL, y = "% Contribution to Component Score") +
         ggplot2::theme_minimal(base_size = 11) +
         ggplot2::theme(
-          axis.text.x = ggplot2::element_text(angle = 45, hjust = 1, size = 8),
-          panel.grid.major.x = ggplot2::element_blank(),
-          legend.position = "none",
+          panel.grid.major.y = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(),
+          axis.text.y = ggplot2::element_text(size = 9),
           plot.background = ggplot2::element_rect(fill = "white", color = NA),
           panel.background = ggplot2::element_rect(fill = "white", color = NA)
         )
       
-      chart_file <- tempfile(fileext = ".png")
-      ggplot2::ggsave(chart_file, p, width = 8, height = 4.5, dpi = 150, bg = "white")
-      chart_b64 <- base64enc::base64encode(chart_file)
+      contrib_chart_file <- tempfile(fileext = ".png")
+      ggplot2::ggsave(contrib_chart_file, p_contrib, width = 7.5, height = 4.5, dpi = 150, bg = "white")
+      contrib_chart_b64 <- base64enc::base64encode(contrib_chart_file)
+      
+      #### All Levels Contribution icicle chart ----
+      # Recursive partition layout: no ggplot2 geom does true left-to-right
+      # icicle bands natively, so rectangle geometry is computed by hand
+      # from the same tree structure the interactive version builds.
+      rpt_ic_ids <- character(0); rpt_ic_labels <- character(0); rpt_ic_parents <- character(0)
+      rpt_ic_values <- numeric(0); rpt_ic_colors <- character(0); rpt_ic_level <- integer(0)
+      rpt_ic_add <- function(id, label, parent, value, color, level) {
+        rpt_ic_ids     <<- c(rpt_ic_ids, id); rpt_ic_labels <<- c(rpt_ic_labels, label)
+        rpt_ic_parents <<- c(rpt_ic_parents, parent); rpt_ic_values <<- c(rpt_ic_values, value)
+        rpt_ic_colors  <<- c(rpt_ic_colors, color); rpt_ic_level <<- c(rpt_ic_level, level)
+      }
+      
+      rpt_exp_defs <- Filter(function(d) d$comp == "Exposure", rpt_factor_defs)
+      rpt_sen_defs <- Filter(function(d) d$comp == "Sensitivity", rpt_factor_defs)
+      rpt_exp_vals <- as.numeric(site_scored[1, sapply(rpt_exp_defs, function(d) d$id)])
+      rpt_sen_vals <- as.numeric(site_scored[1, sapply(rpt_sen_defs, function(d) d$id)])
+      rpt_exp_denom <- sum(rpt_exp_vals^2, na.rm = TRUE)
+      rpt_sen_denom <- sum(rpt_sen_vals^2, na.rm = TRUE)
+      rpt_vuln_denom <- site_scored$EXPOSURE[1]^2 + site_scored$SENSITIVITY[1]^2
+      rpt_exp_share <- 100 * rpt_safe_div(site_scored$EXPOSURE[1]^2, rpt_vuln_denom)
+      rpt_sen_share <- 100 * rpt_safe_div(site_scored$SENSITIVITY[1]^2, rpt_vuln_denom)
+      
+      rpt_ic_add("Vulnerability", "Vulnerability", "", 100, VULN_COLOR, 0)
+      rpt_ic_add("Exposure", "Exposure", "Vulnerability", rpt_exp_share, EXP_COLOR, 1)
+      rpt_ic_add("Sensitivity", "Sensitivity", "Vulnerability", rpt_sen_share, SEN_COLOR, 1)
+      
+      rpt_place_component <- function(defs, vals, denom, comp_id, comp_share, color) {
+        scored <- !sapply(defs, function(d) rpt_na_flag_for(d$id)) & !is.na(vals)
+        for (i in seq_along(defs)) {
+          if (!scored[i]) next
+          d <- defs[[i]]
+          suffix <- if (comp_id == "Exposure") " (E)" else " (S)"
+          lbl <- paste0(d$label, suffix); fid <- paste0(comp_id, "/", lbl)
+          fv <- rpt_safe_div(vals[i]^2, denom) * comp_share
+          rpt_ic_add(fid, lbl, comp_id, fv, color, 2)
+          if (d$type == "euclidean") {
+            nv <- vapply(d$indicators, function(ind) site_scored[[ind$norm_col]][1], numeric(1))
+            sh <- rpt_safe_div(nv^2, sum(nv^2, na.rm = TRUE))
+            for (j in seq_along(d$indicators)) {
+              ind <- d$indicators[[j]]
+              rpt_ic_add(paste0(fid, "/", ind$label), ind$label, fid, sh[j] * fv, IND_COLOR, 3)
+            }
+          }
+        }
+      }
+      rpt_place_component(rpt_exp_defs, rpt_exp_vals, rpt_exp_denom, "Exposure",    rpt_exp_share, EXP_COLOR)
+      rpt_place_component(rpt_sen_defs, rpt_sen_vals, rpt_sen_denom, "Sensitivity", rpt_sen_share, SEN_COLOR)
+      
+      icicle_tree <- data.frame(id = rpt_ic_ids, label = rpt_ic_labels, parent = rpt_ic_parents,
+                                value = rpt_ic_values, color = rpt_ic_colors, level = rpt_ic_level,
+                                stringsAsFactors = FALSE)
+      icicle_tree$y0 <- NA_real_; icicle_tree$y1 <- NA_real_
+      root_idx <- which(icicle_tree$parent == "")
+      icicle_tree$y0[root_idx] <- 0; icicle_tree$y1[root_idx] <- 100
+      
+      rpt_recurse_layout <- function(tree, parent_id) {
+        kids <- which(tree$parent == parent_id)
+        if (length(kids) == 0) return(tree)
+        p_y0 <- tree$y0[tree$id == parent_id]; p_y1 <- tree$y1[tree$id == parent_id]
+        total <- sum(tree$value[kids])
+        cursor <- p_y0
+        kids <- rev(kids)  # first-built child renders at the TOP (y increases upward)
+        for (k in kids) {
+          h <- if (total == 0) 0 else (tree$value[k] / total) * (p_y1 - p_y0)
+          tree$y0[k] <- cursor; tree$y1[k] <- cursor + h
+          cursor <- cursor + h
+          tree <- rpt_recurse_layout(tree, tree$id[k])
+        }
+        tree
+      }
+      icicle_tree <- rpt_recurse_layout(icicle_tree, icicle_tree$id[root_idx])
+      icicle_tree$y0 <- pmin(pmax(icicle_tree$y0, 0), 100)  # clamp float overshoot at scale boundary
+      icicle_tree$y1 <- pmin(pmax(icicle_tree$y1, 0), 100)
+      
+      rpt_col_bounds <- list("0" = c(0.78, 1.0), "1" = c(0.52, 0.76), "2" = c(0.26, 0.50), "3" = c(0.0, 0.24))
+      rpt_bounds <- do.call(rbind, rpt_col_bounds[as.character(icicle_tree$level)])
+      icicle_tree$xmin <- rpt_bounds[, 1]; icicle_tree$xmax <- rpt_bounds[, 2]
+      icicle_tree$box_height <- icicle_tree$y1 - icicle_tree$y0
+      icicle_tree$show_label <- icicle_tree$box_height >= 3.5
+      icicle_tree$label_only <- ifelse(
+        icicle_tree$box_height >= 8, sprintf("%s\n%.1f%%", icicle_tree$label, icicle_tree$value),
+        ifelse(icicle_tree$show_label, sprintf("%s %.0f%%", icicle_tree$label, icicle_tree$value), "")
+      )
+      
+      p_icicle_static <- ggplot2::ggplot(icicle_tree) +
+        ggplot2::geom_rect(ggplot2::aes(xmin = xmin, xmax = xmax, ymin = y0, ymax = y1, fill = color),
+                           color = "white", linewidth = 0.6) +
+        ggplot2::geom_text(data = subset(icicle_tree, show_label),
+                           ggplot2::aes(x = (xmin + xmax) / 2, y = (y0 + y1) / 2, label = label_only),
+                           size = 2.8, color = "white", lineheight = 0.85, fontface = "bold") +
+        ggplot2::scale_fill_identity() +
+        ggplot2::scale_x_continuous(limits = c(0, 1), expand = c(0, 0),
+                                    breaks = c(0.12, 0.38, 0.64, 0.89),
+                                    labels = c("Indicators", "Factors", "Components", "Vulnerability")) +
+        ggplot2::scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
+        ggplot2::labs(x = NULL, y = NULL) +
+        ggplot2::theme_minimal(base_size = 11) +
+        ggplot2::theme(
+          axis.text.x = ggplot2::element_text(size = 9, face = "bold", color = "#1D3557"),
+          axis.text.y = ggplot2::element_blank(), axis.ticks = ggplot2::element_blank(),
+          panel.grid = ggplot2::element_blank(),
+          plot.background = ggplot2::element_rect(fill = "white", color = NA),
+          panel.background = ggplot2::element_rect(fill = "white", color = NA)
+        )
+      
+      icicle_chart_file <- tempfile(fileext = ".png")
+      ggplot2::ggsave(icicle_chart_file, p_icicle_static, width = 8, height = 4, dpi = 150, bg = "white")
+      icicle_chart_b64 <- base64enc::base64encode(icicle_chart_file)
+      
+      #### Companion table for the icicle chart ----
+      # Static images have no hover -- this ensures every indicator/factor's
+      # exact percentage is available even when its box is too small to
+      # carry a visible label (e.g. Storm Surge at a few hundredths of 1%).
+      icicle_table_rows <- icicle_tree[icicle_tree$level %in% c(2, 3), ]
+      icicle_table_rows <- icicle_table_rows[
+        order(match(icicle_table_rows$parent, c("Exposure", "Sensitivity")), -icicle_table_rows$value), ]
+      icicle_table_html <- paste0(
+        "<table style='width:100%;max-width:420px;border-collapse:collapse;font-size:12px;margin:10px 0;'>",
+        "<thead><tr style='border-bottom:2px solid #1D3557;'>",
+        "<th style='padding:4px 8px;text-align:left;'>Factor / Indicator</th>",
+        "<th style='padding:4px 8px;text-align:right;'>% of Vulnerability</th></tr></thead><tbody>",
+        paste0(
+          "<tr><td style='padding:4px 8px;",
+          ifelse(icicle_table_rows$level == 3, "padding-left:24px;color:#666;", "font-weight:600;"),
+          "'>", htmltools::htmlEscape(icicle_table_rows$label), "</td>",
+          "<td style='padding:4px 8px;text-align:right;'>", sprintf("%.2f%%", icicle_table_rows$value),
+          "</td></tr>", collapse = ""
+        ),
+        "</tbody></table>"
+      )
+      
       
       ### Ranking Boxes HTML ----
       make_rank_box <- function(label, ranks, color) {
@@ -1585,6 +1764,14 @@ server <- function(input, output, session) {
         make_rank_row(paste0("Within Region (", site_region, ")"), regional),
         make_rank_row("Nationally", national),
         "</tbody></table>"
+      )
+      
+      ### Hazard Flags ----
+      flags <- c(
+        if (isTRUE(site_scored$flag_fire[1]))    "\U0001F525 Fire"    else NULL,
+        if (isTRUE(site_scored$flag_flood[1]))   "\U0001F4A7 Flood"   else NULL,
+        if (isTRUE(site_scored$flag_slr[1]))     "\U0001F30A Sea Level Rise"     else NULL,
+        if (isTRUE(site_scored$flag_drought[1])) "\u2600\uFE0F Drought" else NULL
       )
       
       ### Hazard Flags HTML ----
@@ -1657,23 +1844,29 @@ server <- function(input, output, session) {
         desc_html,
         flags_html,
         
-        # Raw scores
-        "<div class='score-row'>",
-        "<div class='score-box'><div class='label'>Vulnerability</div><div class='value' style='color:#386150;'>", vuln_score, "</div></div>",
-        "<div class='score-box'><div class='label'>Exposure</div><div class='value' style='color:#457B9D;'>", exp_score, "</div></div>",
-        "<div class='score-box'><div class='label'>Sensitivity</div><div class='value' style='color:#C05235;'>", sen_score, "</div></div>",
-        "</div>",
+        # # Raw scores
+        # "<div class='score-row'>",
+        # "<div class='score-box'><div class='label'>Vulnerability</div><div class='value' style='color:#386150;'>", vuln_score, "</div></div>",
+        # "<div class='score-box'><div class='label'>Exposure</div><div class='value' style='color:#457B9D;'>", exp_score, "</div></div>",
+        # "<div class='score-box'><div class='label'>Sensitivity</div><div class='value' style='color:#C05235;'>", sen_score, "</div></div>",
+        # "</div>",
         
         # Priority Rankings
-        "<h2>Priority Rankings</h2>",
+        "<h2>Priority Rankings <em>(higher percentile = higher relative risk)</em></h2>",
         "<p style='font-size:12px;color:#888;margin-top:-4px;'>Vulnerability percentile rank at four geographic scopes. A rank of 90 means the supply scores higher than 90% of the comparison group.</p>",
         rank_boxes,
         rank_table,
         
-        # Chart
-        "<h2>Factor Score Breakdown</h2>",
-        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Comparison of this site&#39;s factor scores against the national mean. Blue = Exposure, Red = Sensitivity.</p>",
-        "<img src='data:image/png;base64,", chart_b64, "' style='width:100%;max-width:750px;display:block;margin:12px auto;' />",
+        # Component Contribution
+        "<h2>Component Contribution</h2>",
+        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Each factor's share of this site's Exposure or Sensitivity score, calculated nationally. Green = Exposure, Purple = Sensitivity.</p>",
+        "<img src='data:image/png;base64,", contrib_chart_b64, "' style='width:100%;max-width:750px;display:block;margin:12px auto;' />",
+        
+        # All Levels Contribution
+        "<h2>All Levels Contribution</h2>",
+        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Nested view from raw indicators through factors and components to the overall Vulnerability score.</p>",
+        "<img src='data:image/png;base64,", icicle_chart_b64, "' style='width:100%;max-width:750px;display:block;margin:12px auto;' />",
+        icicle_table_html,
         
         # Footer
         "<div class='footer'>",
