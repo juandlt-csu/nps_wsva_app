@@ -222,8 +222,18 @@ ui <- fluidPage(
   ## Custom CSS ----
   tags$head(
     useShinyjs(),
+    tags$script(HTML("document.documentElement.lang = 'en';")),
     tags$style(HTML("
       body { background-color: #EDF4F7; font-family: 'Arial','Helvetica',sans-serif; }
+
+      .skip-link {
+        position:absolute; left:-9999px; top:0; z-index:2000;
+        background:#1D3557; color:white; padding:10px 16px;
+        border-radius:0 0 6px 0; font-weight:600;
+      }
+      .skip-link:focus {
+        left:0;
+      }
 
       .main-header {
   background: #0d1f35;
@@ -280,7 +290,7 @@ ui <- fluidPage(
       .info-box summary::-webkit-details-marker { display:none; }
       .info-box[open] summary .fa-chevron-down { transform:rotate(180deg); }
       .info-box .info-section-title {
-        font-weight:700; color:#1D3557; font-size:1.15rem;
+        font-weight:700; color:#1D3557; font-size:1.15rem; margin:0;
       }
       .info-box .badge-demo {
         display:inline-block; color:white; padding:2px 7px;
@@ -303,6 +313,9 @@ ui <- fluidPage(
         border: none; cursor: pointer; transition: all 0.18s ease;
         background: white; color: #1D3557; outline: none;
       }
+      .view-toggle-btn:focus-visible {
+        outline: 3px solid #457B9D !important; outline-offset: -3px;
+      }
       .view-toggle-btn:first-child { border-right: 1px solid #1D3557; }
       .view-toggle-btn.active {
         background: #1D3557; color: white;
@@ -316,7 +329,7 @@ ui <- fluidPage(
       }
       .view-card-label {
         font-size: 1em; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.08em; color: #888; margin-bottom: 10px;
+        letter-spacing: 0.08em; color: #696969; margin-bottom: 10px;
       }
       .view-card.score-card  { border-left: 3px solid #386150; }
       .view-card.ind-card    { border-left: 3px solid #457B9D; }
@@ -353,7 +366,7 @@ ui <- fluidPage(
         box-shadow:0 2px 8px rgba(29,53,87,0.1); margin-top:15px;
         border:1px solid #dce8ef;
       }
-      .section-panel h4 { color:#1D3557; font-weight:600; margin-top:0; }
+      .section-panel h2 { color:#1D3557; font-weight:600; font-size:1.3rem; margin-top:0; }
       
       /* ── DT selected row highlight ── */
       table.dataTable tbody tr.selected td,
@@ -373,16 +386,18 @@ ui <- fluidPage(
     "))
   ),
   
+  tags$a(href = "#main-content", class = "skip-link", "Skip to main content"),
+  
   ## Header ----
   div(class = "main-header",
       div(class = "main-header-accent"),
       div(class = "main-header-body",
-          h1("NATIONAL PARK SERVICE",
+          div("NATIONAL PARK SERVICE",
              style = "font-size:1rem; font-weight:700; letter-spacing:0.25em;
-                    color:#A8DADC; margin-bottom:8px;"),
+                    color:#A8DADC; margin-bottom:8px; text-align:center;"),
           h1("Water Supply Vulnerability Assessment Tool",
              style = "font-size:2rem; font-weight:800; letter-spacing:0.01em;
-                    line-height:1.2;"),
+                    line-height:1.2; margin:0;"),
           tags$div(style = "width:50px; height:3px; background:#2a7f7f;
                           margin:12px auto 10px auto; border-radius:2px;"),
           em(HTML("&#128679; This app is under active development. All results are preliminary and should not be shared out at this time."),
@@ -392,7 +407,7 @@ ui <- fluidPage(
   ),
   
   ## Control Panel ----
-  div(class = "control-panel",
+  div(class = "control-panel", id = "main-content",
       
       ### How-To Info Box ----
       tags$details(class = "info-box", id = "how_to_details", style = "cursor:pointer;",
@@ -405,7 +420,7 @@ ui <- fluidPage(
                      ),
                      tags$span(
                        icon("info-circle", style = "margin-right:8px;"),
-                       "How to Use This Tool",
+                       h2(style = "display:inline; margin:0; font:inherit; color:inherit;", "How to Use This Tool"),
                        tags$span(
                          id = "how_to_hint",
                          style = "font-size:1.15rem; font-weight:400; color:#A8DADC; margin-left:10px; font-style:italic",
@@ -430,21 +445,21 @@ ui <- fluidPage(
                              HTML("Scores are computed in four steps using a Euclidean distance framework:")),
                            div(style = "display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:6px; margin-bottom:12px; text-align:center;",
                                div(style = "background:#f5f8fa; border:1px solid #dce8ef; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 1"),
+                                   div(style = "font-size:1.2rem; color:#696969; margin-bottom:2px;", "Step 1"),
                                    HTML("<b>Indicators</b> (0&ndash;1)<br><span style='font-size:1.2rem; color:#555;'>normalized raw values</span>")),
                                div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
                                div(style = "background:#f5f8fa; border:1px solid #dce8ef; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 2"),
+                                   div(style = "font-size:1.2rem; color:#696969; margin-bottom:2px;", "Step 2"),
                                    HTML("<b>Factors</b><br><span style='font-size:1.2rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; indicator<sup>2</sup>&thinsp;</span></span><br>
-                     <span style='font-size:1.2rem; color:#888; font-style:italic;'>then normalized to 0&ndash;1</span>")),
+                     <span style='font-size:1.2rem; color:#696969; font-style:italic;'>then normalized to 0&ndash;1</span>")),
                                div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
                                div(style = "background:#edf3f8; border:1px solid #c1d5e0; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 3"),
+                                   div(style = "font-size:1.2rem; color:#696969; margin-bottom:2px;", "Step 3"),
                                    HTML("<b style='color:#457B9D;'>Exposure</b> &amp; <b style='color:#C05235;'>Sensitivity</b><br>
                      <span style='font-size:1.2rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;&Sigma; factor<sup>2</sup>&thinsp;</span></span>")),
                                div(style = "font-size:1.4rem; color:#aaa;", HTML("&rarr;")),
                                div(style = "background:#e8f0e9; border:1px solid #b2ccb5; border-radius:6px; padding:8px 12px;",
-                                   div(style = "font-size:1.2rem; color:#888; margin-bottom:2px;", "Step 4"),
+                                   div(style = "font-size:1.2rem; color:#696969; margin-bottom:2px;", "Step 4"),
                                    HTML("<b style='color:#386150;'>Vulnerability</b><br>
                      <span style='font-size:1.25rem; color:#555;'>&radic;<span style='text-decoration:overline;'>&thinsp;Exp<sup>2</sup> + Sen<sup>2</sup>&thinsp;</span></span>"))
                            ),
@@ -457,22 +472,22 @@ ui <- fluidPage(
             a supply flagged as High Priority within a filtered view may not hold that designation nationally.")),
                            div(style = "background:#fff8e6; border-left:3px solid #8B6914; border-radius:4px; padding:8px 12px; margin-top:6px;",
                                p(style = "font-size:1.4rem; color:#5a4a1a; margin:0;",
-                                 HTML("<b>&#x26A0;&#xFE0F; Scores are relative, not absolute.</b>
+                                 HTML("<b><span aria-hidden='true'>&#x26A0;&#xFE0F;</span> Scores are relative, not absolute.</b>
                 A score only has meaning within the group it is compared against.
                 The same water supply may rank differently depending on whether it is evaluated
                 across CONUS, a region, a state, or a subset of parks. Use filters intentionally to ensure comparisons are meaningful.")))
                        ),
-                       div(class = "info-section-title", icon("exclamation-triangle"), " Priority & Hazard Flags"),
+                       h3(class = "info-section-title", icon("exclamation-triangle"), " Priority & Hazard Flags"),
                        p(HTML("Water supplies in the <strong>top 25% vulnerability score of the current comparison group</strong>
           are flagged as
           <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
           This threshold is recalculated relative to the active filter (CONUS, region, or state subset),
           so priority designations reflect the selected comparison group, not a fixed national threshold.
           Popups also display hazard-specific flags:
-          <span class='badge-demo' style='background:#C05235;'>&#x1F525; Fire</span>
-          <span class='badge-demo' style='background:#457B9D;'>&#x1F4A7; Flood</span>
-          <span class='badge-demo' style='background:#1D3557;'>&#x1F30A; Sea Level Rise</span>
-          <span class='badge-demo' style='background:#8B6914;'>&#x2600;&#xFE0F; Drought</span>"))
+          <span class='badge-demo' style='background:#C05235;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>
+          <span class='badge-demo' style='background:#457B9D;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>
+          <span class='badge-demo' style='background:#1D3557;'><span aria-hidden='true'>&#x1F30A;</span> Sea Level Rise</span>
+          <span class='badge-demo' style='background:#8B6914;'><span aria-hidden='true'>&#x2600;&#xFE0F;</span> Drought</span>"))
                    )
       ),
       
@@ -480,11 +495,11 @@ ui <- fluidPage(
       div(style = "margin-top:6px;",
           
           # Toggle buttons (JS-driven, sets hidden input)
-          tags$div(class = "view-toggle-wrap",
+          tags$div(class = "view-toggle-wrap", role = "group", `aria-label` = "Map display mode",
                    tags$button(id = "btn_score", class = "view-toggle-btn active",
-                               onclick = "setViewMode('score')", "Relative Vulnerability Score"),
+                               onclick = "setViewMode('score')", `aria-pressed` = "true", "Relative Vulnerability Score"),
                    tags$button(id = "btn_indicator", class = "view-toggle-btn",
-                               onclick = "setViewMode('indicator')", "Raw Indicator Values")
+                               onclick = "setViewMode('indicator')", `aria-pressed` = "false", "Raw Indicator Values")
           ),
           
           # Hidden input read by server
@@ -495,14 +510,16 @@ ui <- fluidPage(
           Shiny.setInputValue('view_mode', mode, {priority: 'event'});
           document.getElementById('btn_score').classList.toggle('active', mode === 'score');
           document.getElementById('btn_indicator').classList.toggle('active', mode === 'indicator');
+          document.getElementById('btn_score').setAttribute('aria-pressed', mode === 'score');
+          document.getElementById('btn_indicator').setAttribute('aria-pressed', mode === 'indicator');
         }
       ")),
           
           # Score View card
           conditionalPanel(
             condition = "input.view_mode == 'score'",
-            div(class = "view-card score-card",
-                div(class = "view-card-label", HTML("&#x1F4CA; Map a composite score")),
+            div(class = "view-card score-card", role = "group", `aria-labelledby` = "score-card-label",
+                div(id = "score-card-label", class = "view-card-label", HTML("<span aria-hidden='true'>&#x1F4CA;</span> Map a composite score")),
                 fluidRow(
                   column(5,
                          selectInput("score_view",
@@ -523,8 +540,8 @@ ui <- fluidPage(
           # Specific Indicator card
           conditionalPanel(
             condition = "input.view_mode == 'indicator'",
-            div(class = "view-card ind-card",
-                div(class = "view-card-label", HTML("&#x1F50D; Drill into raw indicator values")),
+            div(class = "view-card ind-card", role = "group", `aria-labelledby` = "ind-card-label",
+                div(id = "ind-card-label", class = "view-card-label", HTML("<span aria-hidden='true'>&#x1F50D;</span> Drill into raw indicator values")),
                 fluidRow(
                   column(3,
                          selectInput("component",
@@ -556,34 +573,36 @@ ui <- fluidPage(
       fluidRow(
         # Geographic filters group
         column(6,
-               div(class = "filter-section-label", HTML("&#x1F4CD; Geographic Filter"),
-                   tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:1.2rem;",
-                             "(filtering by Region and State recalculates scores)")),
-               fluidRow(
-                 column(4,
-                        selectizeInput("filter_region",
-                                       label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
-                                       choices = c("All Regions" = "", all_regions),
-                                       selected = NULL, multiple = TRUE,
-                                       options = list(placeholder = "Search regions...",
-                                                      plugins = list("remove_button")))
-                 ),
-                 column(4,
-                        selectizeInput("filter_state",
-                                       label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
-                                       choices = c("All States" = "", all_states),
-                                       selected = NULL, multiple = TRUE,
-                                       options = list(placeholder = "Search states...",
-                                                      plugins = list("remove_button")))
-                 ),
-                 column(4,
-                        selectizeInput("filter_park",
-                                       label = tags$span("Park Unit", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
-                                       choices = c("All Parks" = "", all_parks),
-                                       selected = NULL, multiple = TRUE,
-                                       options = list(placeholder = "Search parks...",
-                                                      plugins = list("remove_button")))
-                 )
+               div(role = "group", `aria-labelledby` = "geo-filter-label",
+                   div(id = "geo-filter-label", class = "filter-section-label", HTML("<span aria-hidden='true'>&#x1F4CD;</span> Geographic Filter"),
+                       tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:1.2rem;",
+                                 "(filtering recalculates scores)")),
+                   fluidRow(
+                     column(4,
+                            selectizeInput("filter_region",
+                                           label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                           choices = c("All Regions" = "", all_regions),
+                                           selected = NULL, multiple = TRUE,
+                                           options = list(placeholder = "Search regions...",
+                                                          plugins = list("remove_button")))
+                     ),
+                     column(4,
+                            selectizeInput("filter_state",
+                                           label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                           choices = c("All States" = "", all_states),
+                                           selected = NULL, multiple = TRUE,
+                                           options = list(placeholder = "Search states...",
+                                                          plugins = list("remove_button")))
+                     ),
+                     column(4,
+                            selectizeInput("filter_park",
+                                           label = tags$span("Park Unit", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                           choices = c("All Parks" = "", all_parks),
+                                           selected = NULL, multiple = TRUE,
+                                           options = list(placeholder = "Search parks...",
+                                                          plugins = list("remove_button")))
+                     )
+                   )
                )
         ),
         
@@ -594,7 +613,7 @@ ui <- fluidPage(
         column(4,
                fluidRow(
                  column(6,
-                        div(class = "filter-section-label", HTML("&#x26A0;&#xFE0F; Priority Filter")),
+                        div(class = "filter-section-label", HTML("<span aria-hidden='true'>&#x26A0;&#xFE0F;</span> Priority Filter")),
                         br(),
                         div(style = "margin-top:6px;",
                             materialSwitch(
@@ -607,9 +626,9 @@ ui <- fluidPage(
                         )
                  ),
                  column(6,
-                        div(class = "filter-section-label", HTML("&#x1F4A7; Filter by Source Type")),
+                        div(class = "filter-section-label", HTML("<span aria-hidden='true'>&#x1F4A7;</span> Filter by Source Type")),
                         selectizeInput("filter_source_type",
-                                       label = NULL,
+                                       label = tags$span("Source Type", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                        choices = NULL,
                                        selected = NULL,
                                        multiple = TRUE,
@@ -621,7 +640,7 @@ ui <- fluidPage(
         
         # Status badge + clear
         column(2,
-               div(class = "filter-section-label", HTML("&#x2139;&#xFE0F; Current View")),
+               div(class = "filter-section-label", HTML("<span aria-hidden='true'>&#x2139;&#xFE0F;</span> Current View")),
                div(style = "margin-top:6px;",
                    uiOutput("filter_info"),
                    actionButton("clear_filters", "Clear All Filters",
@@ -634,6 +653,9 @@ ui <- fluidPage(
   ## Map ----
   fluidRow(
     column(12,
+           h2(class = "sr-only", "Interactive Vulnerability Map"),
+           p(class = "sr-only",
+             "This interactive map is not fully accessible by screen reader. Every water supply shown on the map is also listed in the sortable, exportable Data Table further down this page."),
            div(style = "position:relative;",
                uiOutput("map_title"),
                # conditionalPanel(
@@ -648,9 +670,10 @@ ui <- fluidPage(
                    style = "position:absolute; bottom:15px; left:10px; z-index:1000;
                             background:white; padding:10px 12px 6px 12px; border-radius:8px;
                             box-shadow:0 2px 8px rgba(0,0,0,0.2); width:300px;",
-                   div(style = "font-size:1.05rem; font-weight:600; color:#1D3557; margin-bottom:2px;",
+                   h3(style = "font-size:1.05rem; font-weight:600; color:#1D3557; margin:0 0 2px 0;",
                        "Indicator Distribution"),
                    plotlyOutput("indicator_distribution_chart", height = "220px", width = "100%"),
+                   uiOutput("indicator_distribution_srsummary"),
                    uiOutput("indicator_distribution_caption")
                  )
                )
@@ -662,7 +685,7 @@ ui <- fluidPage(
   fluidRow(
     column(12,
            div(class = "section-panel",
-               h4(icon("table"), " Data Table"),
+               h2(icon("table"), " Data Table"),
                p(style = "font-size:1.2rem; color:#666;",
                  "Click a row to highlight it on the map."),
                DTOutput("data_table")
@@ -745,8 +768,8 @@ server <- function(input, output, session) {
     states_avail <- sort(unique(na.omit(df$state)))
     current_sel  <- intersect(input$filter_state, states_avail)
     updateSelectizeInput(session, "filter_state",
-                         choices = c("All States" = "", states_avail),
-                         selected = current_sel)
+                      choices = c("All States" = "", states_avail),
+                      selected = current_sel)
   })
   
   observe({
@@ -922,7 +945,7 @@ server <- function(input, output, session) {
                       background:white; padding:10px 15px;
                       border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.2);
                       border-left:4px solid ", border_col, "; z-index:1000; max-width:260px;"),
-      h5(title_text, style = paste0("margin:0; color:", border_col,
+      h3(title_text, style = paste0("margin:0; color:", border_col,
                                     "; font-weight:600; font-size:1.2rem;"))
     )
   })
@@ -1309,13 +1332,51 @@ server <- function(input, output, session) {
       layout(showlegend = FALSE)
   })
   
+  ## Distribution Chart Text Alternative (screen-reader only) ----
+  # The plotly chart above conveys shape visually; this gives an equivalent
+  # numeric summary for anyone who can't see or interact with the chart.
+  output$indicator_distribution_srsummary <- renderUI({
+    req(input$view_mode == "indicator")
+    req(input$component, input$factor, input$indicator)
+    cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
+    req(!is.null(cfg))
+    raw_col <- cfg$raw_col
+    
+    nat_df <- as.data.frame(combined_data)
+    req(raw_col %in% names(nat_df))
+    nat_vals <- suppressWarnings(as.numeric(nat_df[[raw_col]]))
+    nat_vals <- nat_vals[is.finite(nat_vals)]
+    req(length(nat_vals) > 0)
+    
+    nat_summary <- sprintf(
+      "National distribution of %s across %d sites: minimum %s, maximum %s, mean %s.",
+      cfg$raw_label, length(nat_vals), signif(min(nat_vals), 3), signif(max(nat_vals), 3), signif(mean(nat_vals), 3)
+    )
+    
+    filt_df   <- as.data.frame(filtered_data_display())
+    filt_vals <- if (nrow(filt_df) < nrow(nat_df) && raw_col %in% names(filt_df)) {
+      v <- suppressWarnings(as.numeric(filt_df[[raw_col]])); v[is.finite(v)]
+    } else {
+      numeric(0)
+    }
+    
+    filt_summary <- if (length(filt_vals) > 0) {
+      sprintf(" Filtered distribution across %d sites: minimum %s, maximum %s, mean %s.",
+              length(filt_vals), signif(min(filt_vals), 3), signif(max(filt_vals), 3), signif(mean(filt_vals), 3))
+    } else {
+      ""
+    }
+    
+    tags$p(class = "sr-only", paste0(nat_summary, filt_summary))
+  })
+  
   ## Distribution Chart Caption: names the highlighted site ----
   output$indicator_distribution_caption <- renderUI({
     req(input$view_mode == "indicator")
     sel_id <- clicked_site()
     if (is.null(sel_id)) {
-      return(tags$div(style = "font-size:1rem; color:#888; margin-top:2px;",
-                      "Click a water supply on the map to highlight its value."))
+      return(tags$div(style = "font-size:1rem; color:#696969; margin-top:2px;",
+                       "Click a water supply on the map to highlight its value."))
     }
     req(input$component, input$factor, input$indicator)
     cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
@@ -1326,7 +1387,7 @@ server <- function(input, output, session) {
     val   <- suppressWarnings(as.numeric(row[[cfg$raw_col]][1]))
     label <- row$park_unit[1]
     if (!is.finite(val)) {
-      tags$div(style = "font-size:1rem; color:#888; margin-top:2px;",
+      tags$div(style = "font-size:1rem; color:#696969; margin-top:2px;",
                paste0(label, " \u2013 value not available for this indicator"))
     } else {
       tags$div(style = "font-size:1rem; color:#C05235; font-weight:600; margin-top:2px;",
@@ -1494,7 +1555,7 @@ server <- function(input, output, session) {
       layout(
         title = list(
           text = paste0(site_title,
-                        "<br><span style='font-size:11px;color:#888;font-weight:400;'>",
+                        "<br><span style='font-size:11px;color:#696969;font-weight:400;'>",
                         "% share of Exposure / Sensitivity score \u00b7 ", scope_label,
                         " \u00b7 hover a bar for its indicator breakdown</span>"),
           font = list(size = 14, color = "#1D3557"), x = 0, xanchor = "left"),
@@ -1512,7 +1573,7 @@ server <- function(input, output, session) {
     # -> Vulnerability, as a nested icicle chart (indicators on the left,
     # Vulnerability on the right, via tiling$flip="x"). 
     # -----------------------------------------------------------------
-    
+
     ic_ids <- character(0); ic_labels <- character(0); ic_parents <- character(0)
     ic_values <- numeric(0); ic_colors <- character(0)
     ic_add <- function(id, label, parent, value, color) {
@@ -1579,7 +1640,7 @@ server <- function(input, output, session) {
     # Modal with both tabs
     # ===================================================================
     showModal(modalDialog(
-      title = NULL,
+      title = paste0("Score Contribution Breakdown \u2013 ", site_title),
       tabsetPanel(
         tabPanel("Component Contribution",
                  renderPlotly(p_bars),
@@ -1890,7 +1951,7 @@ server <- function(input, output, session) {
         paste0(
           "<div style='flex:1;background:white;border-radius:8px;padding:14px 12px;border-top:4px solid ", color, ";",
           "box-shadow:0 2px 6px rgba(0,0,0,0.08);text-align:center;min-width:140px;'>",
-          "<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;'>", label, "</div>",
+          "<div style='font-size:11px;color:#696969;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;'>", label, "</div>",
           "<div style='font-size:28px;font-weight:800;color:", color, ";'>", rank_val, "</div>",
           "<div style='font-size:11px;color:#999;margin-top:2px;'>n = ", ranks$n, " sites</div>",
           priority_badge,
@@ -1974,7 +2035,7 @@ server <- function(input, output, session) {
         "h1{color:#1D3557;font-size:24px;margin:0 0 4px 0;}",
         "h2{color:#1D3557;font-size:17px;border-bottom:2px solid #2a7f7f;padding-bottom:4px;margin-top:28px;}",
         ".subtitle{color:#386150;font-size:16px;font-weight:600;margin:0 0 2px 0;}",
-        ".meta{color:#888;font-size:13px;margin:0 0 8px 0;}",
+        ".meta{color:#696969;font-size:13px;margin:0 0 8px 0;}",
         ".accent-line{height:3px;background:linear-gradient(90deg,#1D3557,#2a7f7f,#A8DADC);border-radius:2px;margin:12px 0 20px 0;}",
         "table{border-collapse:collapse;width:100%;}",
         "thead tr{border-bottom:2px solid #1D3557;}",
@@ -1984,7 +2045,7 @@ server <- function(input, output, session) {
         ".info-table td:first-child{font-weight:600;color:#1D3557;width:140px;}",
         ".score-row{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;}",
         ".score-box{background:#f0f5f8;border-radius:6px;padding:10px 16px;text-align:center;flex:1;min-width:120px;}",
-        ".score-box .label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.05em;}",
+        ".score-box .label{font-size:11px;color:#696969;text-transform:uppercase;letter-spacing:0.05em;}",
         ".score-box .value{font-size:22px;font-weight:700;}",
         ".footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;text-align:center;font-size:11px;color:#999;}",
         "@media print{body{padding:20px;}}",
@@ -2020,18 +2081,18 @@ server <- function(input, output, session) {
         
         # Priority Rankings
         "<h2>Priority Rankings <em>(higher percentile = higher relative risk)</em></h2>",
-        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Vulnerability percentile rank at four geographic scopes. A rank of 90 means the supply scores higher than 90% of the comparison group.</p>",
+        "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Vulnerability percentile rank at four geographic scopes. A rank of 90 means the supply scores higher than 90% of the comparison group.</p>",
         rank_boxes,
         rank_table,
         
         # Component Contribution
         "<h2>Component Contribution</h2>",
-        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Each factor's share of this site's Exposure or Sensitivity score, calculated nationally. Green = Exposure, Purple = Sensitivity.</p>",
+        "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Each factor's share of this site's Exposure or Sensitivity score, calculated nationally. Green = Exposure, Purple = Sensitivity.</p>",
         "<img src='data:image/png;base64,", contrib_chart_b64, "' style='width:100%;max-width:750px;display:block;margin:12px auto;' />",
         
         # All Levels Contribution
         "<h2>All Levels Contribution</h2>",
-        "<p style='font-size:12px;color:#888;margin-top:-4px;'>Nested view from raw indicators through factors and components to the overall Vulnerability score.</p>",
+        "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Nested view from raw indicators through factors and components to the overall Vulnerability score.</p>",
         "<img src='data:image/png;base64,", icicle_chart_b64, "' style='width:100%;max-width:750px;display:block;margin:12px auto;' />",
         icicle_table_html,
         
@@ -2180,10 +2241,10 @@ server <- function(input, output, session) {
         # Build combined priority flags column
         priority_flags = paste0(
           ifelse(!is.na(priority_group) & priority_group, "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>HIGH PRIORITY</span>", ""),
-          ifelse(!is.na(flag_fire)    & flag_fire,    "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F525; Fire</span>", ""),
-          ifelse(!is.na(flag_flood)   & flag_flood,   "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F4A7; Flood</span>", ""),
-          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x1F30A; Sea Level Rise</span>", ""),
-          ifelse(!is.na(flag_drought) & flag_drought,  "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>&#x2600;&#xFE0F; Drought</span>", "")
+          ifelse(!is.na(flag_fire)    & flag_fire,    "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>", ""),
+          ifelse(!is.na(flag_flood)   & flag_flood,   "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>", ""),
+          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F30A;</span> Sea Level Rise</span>", ""),
+          ifelse(!is.na(flag_drought) & flag_drought,  "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x2600;&#xFE0F;</span> Drought</span>", "")
         )
       ) %>%
       select(-priority_group, -flag_fire, -flag_flood, -flag_slr, -flag_drought)
@@ -2199,6 +2260,7 @@ server <- function(input, output, session) {
     dt_ids(df$wsd_source_id)
     
     datatable(df,
+              caption = "Water supply vulnerability data for sites currently visible on the map. Sortable, filterable, and exportable as CSV or Excel using the buttons above the table.",
               selection  = "single",
               rownames   = FALSE,
               escape     = FALSE,
@@ -2274,10 +2336,10 @@ server <- function(input, output, session) {
     
     flags <- c(
       if (isTRUE(priority))    "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>HIGH PRIORITY</span>" else NULL,
-      if (isTRUE(flag_fire))   "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F525; Fire</span>"   else NULL,
-      if (isTRUE(flag_flood))  "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F4A7; Flood</span>"  else NULL,
-      if (isTRUE(flag_slr))    "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x1F30A; Sea Level Rise</span>"    else NULL,
-      if (isTRUE(flag_drought)) "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>&#x2600;&#xFE0F; Drought</span>" else NULL
+      if (isTRUE(flag_fire))   "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>"   else NULL,
+      if (isTRUE(flag_flood))  "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>"  else NULL,
+      if (isTRUE(flag_slr))    "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F30A;</span> Sea Level Rise</span>"    else NULL,
+      if (isTRUE(flag_drought)) "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x2600;&#xFE0F;</span> Drought</span>" else NULL
     )
     flag_section <- if (length(flags) > 0)
       paste0("<hr style='margin:6px 0; border-color:#ddd;'>", paste(flags, collapse=" "))
@@ -2294,7 +2356,7 @@ server <- function(input, output, session) {
       if (!is.na(description) && nchar(trimws(description)) > 0)
         paste0("<a href='#' onclick=\"Shiny.setInputValue('show_description_btn', '",
                wsd_source_id, "', {priority:'event'}); return false;\" ",
-               "style='font-size:11px; color:#457B9D;'>&#x1F4C4; View Full Description</a><br>")
+               "style='font-size:11px; color:#457B9D;'><span aria-hidden='true'>&#x1F4C4;</span> View Full Description</a><br>")
       else paste0("<span style='font-size:11px; color:#999; font-style:italic;'>",
                   "No water supply description available.</span><br>"),
       "<hr style='margin:6px 0; border-color:#ddd;'>",
@@ -2302,12 +2364,12 @@ server <- function(input, output, session) {
       "', {priority: 'event'});\" ",
       "style='background:#1D3557;color:white;border:none;border-radius:4px;",
       "padding:5px 10px;font-size:11px;cursor:pointer;width:100%;margin-bottom:4px;'>",
-      "&#x1F4CA; View Score Breakdown</button>",
+      "<span aria-hidden='true'>&#x1F4CA;</span> View Score Breakdown</button>",
       "<button onclick=\"Shiny.setInputValue('generate_report_btn', '", wsd_source_id,
       "', {priority: 'event'});\" ",
       "style='background:#2a7f7f;color:white;border:none;border-radius:4px;",
       "padding:5px 10px;font-size:11px;cursor:pointer;width:100%;'>",
-      "&#x1F4C4; Generate Report</button>")
+      "<span aria-hidden='true'>&#x1F4C4;</span> Generate Report</button>")
     
     paste0("<div style='font-family:Arial; font-size:12px; min-width:210px;'>",
            top_section, score_section, flag_section, site_section, "</div>")
