@@ -561,14 +561,20 @@ ui <- fluidPage(
                              "(filtering recalculates scores)")),
                fluidRow(
                  column(4,
-                        selectInput("filter_region",
-                                    label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
-                                    choices = c("All Regions" = "", all_regions), selected = "")
+                        selectizeInput("filter_region",
+                                       label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                       choices = c("All Regions" = "", all_regions),
+                                       selected = NULL, multiple = TRUE,
+                                       options = list(placeholder = "Search regions...",
+                                                      plugins = list("remove_button")))
                  ),
                  column(4,
-                        selectInput("filter_state",
-                                    label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
-                                    choices = c("All States" = "", all_states), selected = "")
+                        selectizeInput("filter_state",
+                                       label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                       choices = c("All States" = "", all_states),
+                                       selected = NULL, multiple = TRUE,
+                                       options = list(placeholder = "Search states...",
+                                                      plugins = list("remove_button")))
                  ),
                  column(4,
                         selectizeInput("filter_park",
@@ -635,7 +641,19 @@ ui <- fluidPage(
                #   div(class = "loading-overlay",
                #       h4(icon("spinner", class = "fa-spin"), " Loading park boundaries..."))
                # ),
-               leafletOutput("map", height = "calc(110vh - 360px)")
+               leafletOutput("map", height = "calc(110vh - 360px)"),
+               conditionalPanel(
+                 condition = "input.view_mode == 'indicator'",
+                 div(
+                   style = "position:absolute; bottom:15px; left:10px; z-index:1000;
+                            background:white; padding:10px 12px 6px 12px; border-radius:8px;
+                            box-shadow:0 2px 8px rgba(0,0,0,0.2); width:300px;",
+                   div(style = "font-size:1.05rem; font-weight:600; color:#1D3557; margin-bottom:2px;",
+                       "Indicator Distribution"),
+                   plotlyOutput("indicator_distribution_chart", height = "220px", width = "100%"),
+                   uiOutput("indicator_distribution_caption")
+                 )
+               )
            )
     )
   ),
@@ -695,10 +713,11 @@ server <- function(input, output, session) {
   
   ## Clear Filters ----
   observeEvent(input$clear_filters, {
-    updateSelectInput(session, "filter_region", selected = "")
-    updateSelectInput(session, "filter_state",  selected = "")
+    updateSelectizeInput(session, "filter_region", selected = character(0))
+    updateSelectizeInput(session, "filter_state",  selected = character(0))
     updateSelectizeInput(session, "filter_park", selected = character(0))
     updateSelectizeInput(session, "filter_source_type", selected = character(0))
+    clicked_site(NULL)
   })
   
   ## Description Pop-Out Modal ----
@@ -719,23 +738,24 @@ server <- function(input, output, session) {
   ## State & Park Filters Cascade ----
   observe({
     df <- as.data.frame(combined_data)
-    if (input$filter_region != "") {
-      df <- df %>% filter(region == input$filter_region)
+    if (length(input$filter_region) > 0) {
+      df <- df %>% filter(region %in% input$filter_region)
     }
     
     states_avail <- sort(unique(na.omit(df$state)))
-    updateSelectInput(session, "filter_state",
-                      choices = c("All States" = "", states_avail),
-                      selected = input$filter_state)
+    current_sel  <- intersect(input$filter_state, states_avail)
+    updateSelectizeInput(session, "filter_state",
+                         choices = c("All States" = "", states_avail),
+                         selected = current_sel)
   })
   
   observe({
     df <- as.data.frame(combined_data)
-    if (input$filter_region != "") {
-      df <- df %>% filter(region == input$filter_region)
+    if (length(input$filter_region) > 0) {
+      df <- df %>% filter(region %in% input$filter_region)
     }
-    if (input$filter_state != "") {
-      df <- df %>% filter(state == input$filter_state)
+    if (length(input$filter_state) > 0) {
+      df <- df %>% filter(state %in% input$filter_state)
     }
     
     parks_avail <- sort(unique(na.omit(df$park_unit)))
@@ -758,10 +778,10 @@ server <- function(input, output, session) {
   # within that subset so rankings are relative to the filtered group.
   geo_recalculated_data <- reactive({
     df <- combined_data
-    if (input$filter_region != "") df <- df %>% filter(region == input$filter_region)
-    if (input$filter_state  != "") df <- df %>% filter(state  == input$filter_state)
+    if (length(input$filter_region) > 0) df <- df %>% filter(region %in% input$filter_region)
+    if (length(input$filter_state)  > 0) df <- df %>% filter(state  %in% input$filter_state)
     
-    has_geo_filter <- input$filter_region != "" || input$filter_state != ""
+    has_geo_filter <- length(input$filter_region) > 0 || length(input$filter_state) > 0
     if (has_geo_filter) {
       geom <- st_geometry(df)
       df_recalc <- tryCatch(
@@ -827,15 +847,18 @@ server <- function(input, output, session) {
   output$filter_info <- renderUI({
     n   <- nrow(filtered_data())
     tot <- nrow(combined_data)
-    has_geo_filter  <- input$filter_region != "" || input$filter_state != ""
+    has_geo_filter  <- length(input$filter_region) > 0 || length(input$filter_state) > 0
     has_park_filter <- length(input$filter_park) > 0
     
-    context_label <- if (input$filter_region != "" && input$filter_state != "") {
-      paste0(input$filter_state, " (", input$filter_region, ")")
-    } else if (input$filter_state != "") {
-      input$filter_state
-    } else if (input$filter_region != "") {
-      input$filter_region
+    region_label <- paste(input$filter_region, collapse = ", ")
+    state_label  <- paste(input$filter_state,  collapse = ", ")
+    
+    context_label <- if (length(input$filter_region) > 0 && length(input$filter_state) > 0) {
+      paste0(state_label, " (", region_label, ")")
+    } else if (length(input$filter_state) > 0) {
+      state_label
+    } else if (length(input$filter_region) > 0) {
+      region_label
     } else {
       "National"
     }
@@ -1167,6 +1190,150 @@ server <- function(input, output, session) {
     clicked_site(click$id)
   })
   
+  ## Raw Indicator Distribution Chart (lower-left map overlay) ----
+  # National histogram always shows. A second, filtered histogram appears
+  # below it once any active filter narrows the data below the full national
+  # set. Both use identical bin edges (computed from the national range) so
+  # they're directly comparable on the same x-axis. A vertical line marks
+  # the last-clicked water supply's raw value when it's available.
+  output$indicator_distribution_chart <- renderPlotly({
+    req(input$view_mode == "indicator")
+    req(input$component, input$factor, input$indicator)
+    cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
+    req(!is.null(cfg))
+    raw_col <- cfg$raw_col
+    
+    nat_df <- as.data.frame(combined_data)
+    req(raw_col %in% names(nat_df))
+    nat_vals <- suppressWarnings(as.numeric(nat_df[[raw_col]]))
+    nat_vals <- nat_vals[is.finite(nat_vals)]
+    req(length(nat_vals) > 0)
+    
+    x_range <- range(nat_vals)
+    pad <- diff(x_range) * 0.04
+    if (pad == 0) pad <- 0.5
+    x_range <- c(x_range[1] - pad, x_range[2] + pad)
+    
+    n_bins    <- 20
+    bin_edges <- seq(x_range[1], x_range[2], length.out = n_bins + 1)
+    bin_size  <- diff(bin_edges)[1]
+    
+    filt_df     <- as.data.frame(filtered_data_display())
+    is_filtered <- nrow(filt_df) < nrow(nat_df)
+    filt_vals   <- if (is_filtered && raw_col %in% names(filt_df)) {
+      v <- suppressWarnings(as.numeric(filt_df[[raw_col]])); v[is.finite(v)]
+    } else {
+      numeric(0)
+    }
+    
+    # Selected water supply (last clicked marker). Looked up nationally so
+    # its value still resolves even if filters have since excluded it from
+    # the current view.
+    sel_id  <- clicked_site()
+    sel_val <- NA_real_
+    sel_in_filtered <- FALSE
+    if (!is.null(sel_id)) {
+      row <- nat_df[nat_df$wsd_source_id == sel_id, ]
+      if (nrow(row) > 0) {
+        v <- suppressWarnings(as.numeric(row[[raw_col]][1]))
+        if (is.finite(v)) sel_val <- v
+        sel_in_filtered <- sel_id %in% filt_df$wsd_source_id
+      }
+    }
+    
+    x_title <- str_wrap(cfg$raw_label, 40)
+    
+    highlight_shape <- function(x0) {
+      list(type = "line", x0 = x0, x1 = x0, y0 = 0, y1 = 1, yref = "paper",
+           line = list(color = "#C05235", width = 2))
+    }
+    
+    # Pre-bin manually (rather than letting plotly's histogram trace bin
+    # client-side) so each bar's hover text can show its exact value range
+    # above the site count.
+    bin_hover_data <- function(vals, edges) {
+      n_edges <- length(edges) - 1
+      idx     <- cut(vals, breaks = edges, include.lowest = TRUE, right = FALSE, labels = FALSE)
+      counts  <- as.integer(table(factor(idx, levels = seq_len(n_edges))))
+      centers <- (head(edges, -1) + tail(edges, -1)) / 2
+      lo      <- signif(head(edges, -1), 3)
+      hi      <- signif(tail(edges, -1), 3)
+      hover   <- paste0(lo, " \u2013 ", hi, "<br>", counts, " sites")
+      list(x = centers, y = counts, hover = hover)
+    }
+    
+    nat_bins <- bin_hover_data(nat_vals, bin_edges)
+    
+    p_nat <- plot_ly() %>%
+      add_trace(x = nat_bins$x, y = nat_bins$y, type = "bar", width = bin_size,
+                marker = list(color = "#457B9D", line = list(color = "white", width = 0.5)),
+                hovertext = nat_bins$hover, hoverinfo = "text", name = "National") %>%
+      layout(
+        annotations = list(list(
+          text = paste0("National (n=", length(nat_vals), ")"),
+          x = 0, y = 1, xref = "paper", yref = "paper", xanchor = "left", yanchor = "bottom",
+          showarrow = FALSE, font = list(size = 11, color = "#1D3557")
+        )),
+        yaxis = list(title = "", showticklabels = FALSE),
+        xaxis = list(title = "", range = x_range),
+        bargap = 0.05, margin = list(t = 18, b = 5, l = 5, r = 5)
+      )
+    if (is.finite(sel_val)) p_nat <- p_nat %>% layout(shapes = list(highlight_shape(sel_val)))
+    
+    # No active filter (or filter didn't narrow anything) -- national chart only
+    if (!is_filtered || length(filt_vals) == 0) {
+      return(p_nat %>% layout(xaxis = list(title = x_title, range = x_range), showlegend = FALSE))
+    }
+    
+    filt_bins <- bin_hover_data(filt_vals, bin_edges)
+    
+    p_filt <- plot_ly() %>%
+      add_trace(x = filt_bins$x, y = filt_bins$y, type = "bar", width = bin_size,
+                marker = list(color = "#386150", line = list(color = "white", width = 0.5)),
+                hovertext = filt_bins$hover, hoverinfo = "text", name = "Filtered") %>%
+      layout(
+        annotations = list(list(
+          text = paste0("Filtered View (n=", length(filt_vals), ")"),
+          x = 0, y = 1, xref = "paper", yref = "paper", xanchor = "left", yanchor = "bottom",
+          showarrow = FALSE, font = list(size = 11, color = "#386150")
+        )),
+        yaxis = list(title = "", showticklabels = FALSE),
+        xaxis = list(title = x_title, range = x_range),
+        bargap = 0.05, margin = list(t = 18, b = 32, l = 5, r = 5)
+      )
+    if (is.finite(sel_val) && sel_in_filtered) {
+      p_filt <- p_filt %>% layout(shapes = list(highlight_shape(sel_val)))
+    }
+    
+    subplot(p_nat, p_filt, nrows = 2, shareX = TRUE, titleX = TRUE, margin = 0.05) %>%
+      layout(showlegend = FALSE)
+  })
+  
+  ## Distribution Chart Caption: names the highlighted site ----
+  output$indicator_distribution_caption <- renderUI({
+    req(input$view_mode == "indicator")
+    sel_id <- clicked_site()
+    if (is.null(sel_id)) {
+      return(tags$div(style = "font-size:1rem; color:#888; margin-top:2px;",
+                      "Click a water supply on the map to highlight its value."))
+    }
+    req(input$component, input$factor, input$indicator)
+    cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
+    req(!is.null(cfg))
+    nat_df <- as.data.frame(combined_data)
+    row <- nat_df[nat_df$wsd_source_id == sel_id, ]
+    if (nrow(row) == 0) return(NULL)
+    val   <- suppressWarnings(as.numeric(row[[cfg$raw_col]][1]))
+    label <- row$park_unit[1]
+    if (!is.finite(val)) {
+      tags$div(style = "font-size:1rem; color:#888; margin-top:2px;",
+               paste0(label, " \u2013 value not available for this indicator"))
+    } else {
+      tags$div(style = "font-size:1rem; color:#C05235; font-weight:600; margin-top:2px;",
+               paste0("\u25CF ", label, ": ", signif(val, 3)))
+    }
+  })
+  
   ## Table Row Click: Zoom to Site ----
   observeEvent(input$data_table_rows_selected, {
     row_idx <- input$data_table_rows_selected
@@ -1214,8 +1381,8 @@ server <- function(input, output, session) {
     NA_COLOR   <- "#c9c9c9"
     
     site_title  <- paste0(site_row$park_unit[1], " \u2013 ", site_row$wsd_source_id[1])
-    scope_label <- if (input$filter_state != "") paste("State:", input$filter_state)
-    else if (input$filter_region != "") paste("Region:", input$filter_region)
+    scope_label <- if (length(input$filter_state) > 0) paste("State:", paste(input$filter_state, collapse = ", "))
+    else if (length(input$filter_region) > 0) paste("Region:", paste(input$filter_region, collapse = ", "))
     else "National (CONUS)"
     
     # -----------------------------------------------------------------
@@ -1345,7 +1512,7 @@ server <- function(input, output, session) {
     # -> Vulnerability, as a nested icicle chart (indicators on the left,
     # Vulnerability on the right, via tiling$flip="x"). 
     # -----------------------------------------------------------------
-
+    
     ic_ids <- character(0); ic_labels <- character(0); ic_parents <- character(0)
     ic_values <- numeric(0); ic_colors <- character(0)
     ic_add <- function(id, label, parent, value, color) {
@@ -1834,11 +2001,11 @@ server <- function(input, output, session) {
         # Site Info
         "<h2>Site Information</h2>",
         "<table class='info-table'>",
+        "<tr><td>Water System</td><td>", htmltools::htmlEscape(site_meta$water_system_name[1]), "</td></tr>",
         "<tr><td>Park Unit</td><td>", htmltools::htmlEscape(site_park), "</td></tr>",
         "<tr><td>Park Name</td><td>", htmltools::htmlEscape(site_meta$park_name[1]), "</td></tr>",
         "<tr><td>State</td><td>", htmltools::htmlEscape(site_state), "</td></tr>",
         "<tr><td>Region</td><td>", htmltools::htmlEscape(site_region), "</td></tr>",
-        "<tr><td>Water System</td><td>", htmltools::htmlEscape(site_meta$water_system_name[1]), "</td></tr>",
         "<tr><td>Source Type</td><td>", htmltools::htmlEscape(sys_type), "</td></tr>",
         "</table>",
         desc_html,
@@ -1998,8 +2165,9 @@ server <- function(input, output, session) {
       coords[, 2] >= bounds$south & coords[, 2] <= bounds$north
     
     df <- as.data.frame(base_data[in_view, ]) %>%
-      select(wsd_source_id, park_unit, park_name, state, region,
-             water_system_name, source_type,
+      select(wsd_source_id, water_system_name,
+             park_unit, park_name, state, region,
+             source_type,
              VULNERABILITY, VULNERABILITY_rank, EXPOSURE, EXPOSURE_rank,
              SENSITIVITY, SENSITIVITY_rank,
              vulnerability_quartile,
@@ -2117,10 +2285,10 @@ server <- function(input, output, session) {
     
     site_section <- paste0(
       "<hr style='margin:6px 0; border-color:#ddd;'>",
+      "<b>Water System:</b> ",    water_system_name, "<br>",
       "<b>Water Supply ID:</b> ", wsd_source_id, "<br>",
       "<b>Park Unit:</b> ",       park_unit,      "<br>",
       "<b>Park Name:</b> ",       park_name,      "<br>",
-      "<b>Water System:</b> ",    water_system_name, "<br>",
       "<b>Source Type:</b> ",     ifelse(is.na(source_type), "<span style='color:#999;'>N/A</span>", source_type), "<br>",
       "<b>State:</b> ",           state,           "<br>",
       if (!is.na(description) && nchar(trimws(description)) > 0)
