@@ -558,7 +558,7 @@ ui <- fluidPage(
         column(6,
                div(class = "filter-section-label", HTML("&#x1F4CD; Geographic Filter"),
                    tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:1.2rem;",
-                             "(filtering recalculates scores)")),
+                             "(filtering by Region and State recalculates scores)")),
                fluidRow(
                  column(4,
                         selectizeInput("filter_region",
