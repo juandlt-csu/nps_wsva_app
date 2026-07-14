@@ -96,10 +96,22 @@ indicator_config <- list(
         raw_label = "Change in drought (SPEI)",
         description = "Projected change in SPEI based on monthly precipitation and PET"
       ),
-      "Drough Model Agreement" = list(
+      "Drought Model Agreement" = list(
         col = "norm_exp_drought_model_agree", raw_col = "exp_drought_model_agree",
         raw_label = "% models predicting decrease",
         description = "% of climate models predicting a decrease in SPEI"
+      )
+    ),
+    "Demand" = list(
+      "Change in Competition" = list(
+        col = "norm_exp_nearby_use_change", raw_col = "exp_nearby_use_change",
+        raw_label = "% change in nearby water use per km\u00b2 (90th percentile of all models)",
+        description = "Projected change in county water use (competition for supply) "
+      ),
+      "Competition Model Agreement" = list(
+        col = "norm_exp_nearby_use_model_agree", raw_col = "exp_nearby_use_model_agree",
+        raw_label = "% models predicting increase",
+        description = "% of climate models predicting an increase in county water use"
       )
     ),
     "Sea Level Rise" = list(
@@ -207,6 +219,7 @@ factor_labels <- c(
   "factor_exp_drought"      = "Drought\n(Exp)",
   "factor_exp_slr"          = "Sea Level Rise\n(Exp)",
   "factor_exp_wildfire"     = "Wildfire\n(Exp)",
+  "factor_exp_demand"       = "Demand\n(Exp)",
   "factor_sen_demand"       = "Demand\n(Sen)",
   #"factor_sen_water_supply" = "Supply\n(Sen)",
   "factor_sen_wildfire"     = "Wildfire\n(Sen)",
@@ -1464,6 +1477,7 @@ server <- function(input, output, session) {
              list(norm_col="norm_exp_storm_surge",     label="Storm Surge")
            )),
       list(id="factor_exp_wildfire", comp="Exposure",    label="Wildfire", type="single"),
+      list(id="factor_exp_demand", comp="Exposure", label="Demand", type="single"),
       list(id="factor_sen_demand",   comp="Sensitivity", label="Demand",   type="euclidean",
            indicators=list(
              list(norm_col="norm_sen_visitation_trend", label="Visitation Trend"),
