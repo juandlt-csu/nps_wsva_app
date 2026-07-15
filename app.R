@@ -194,6 +194,13 @@ indicator_config <- list(
         raw_label = "Mann-Kendall slope (30-yr precip)",
         description = "30-year historical trend in precipitation (Mann-Kendall slope)"
       )
+    ),
+    "Drought" = list(
+      "Historical Drought Trend" = list(
+        col = "norm_sen_drought_trend", raw_col = "sen_drought_trend",
+        raw_label = "Mann-Kendall slope (30-yr SPEI)",
+        description = "30-year historical trend in SPEI (water deficit metric for drought)"
+      )
     )
   )
 )
@@ -226,7 +233,8 @@ factor_labels <- c(
   "factor_sen_flood"        = "Flood\n(Sen)",
   "factor_sen_slr"          = "Sea Level Rise\n(Sen)",
   "factor_sen_runoff"       = "Runoff\n(Sen)",
-  "factor_sen_precip"       = "Precip\n(Sen)"
+  "factor_sen_precip"       = "Precip\n(Sen)",
+  "factor_sen_drought"      = "Drought\n(Sen)"
 )
 
 # UI ----
@@ -709,7 +717,7 @@ ui <- fluidPage(
   ## Footer ----
   div(style = "margin-top:20px; padding:20px; background-color:#1D3557;
                color:white; text-align:center;",
-      p("Application developed by the Colorado State University Geospatial Centroid | Data current as of April 2026",
+      p("Application developed by the Colorado State University Geospatial Centroid | Data current as of July 2026",
         style = "margin:0; opacity:0.9;")
   )
 )
@@ -1487,7 +1495,8 @@ server <- function(input, output, session) {
       list(id="factor_sen_flood",    comp="Sensitivity", label="Flood",    type="single"),
       list(id="factor_sen_slr",      comp="Sensitivity", label="Sea Level Rise",      type="single"),
       list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single"),
-      list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single")
+      list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single"),
+      list(id="factor_sen_drought",  comp="Sensitivity", label="Drought", type="single")
     )
     na_flag_for <- function(id) (grepl("runoff", id) & is_rainwater) | (grepl("precip", id) & !is_rainwater)
     
@@ -1754,6 +1763,7 @@ server <- function(input, output, session) {
         list(id="factor_exp_runoff",   comp="Exposure",    label="Runoff",   type="single"),
         list(id="factor_exp_precip",   comp="Exposure",    label="Precip",   type="single"),
         list(id="factor_exp_drought",  comp="Exposure",    label="Drought",  type="single"),
+        list(id="factor_exp_drought",  comp="Exposure",    label="Demand",   type="single"),
         list(id="factor_exp_slr",      comp="Exposure",    label="Sea Level Rise", type="euclidean",
              indicators=list(
                list(norm_col="norm_exp_inundation_slr", label="Inundation"),
@@ -1770,7 +1780,8 @@ server <- function(input, output, session) {
         list(id="factor_sen_flood",    comp="Sensitivity", label="Flood",    type="single"),
         list(id="factor_sen_slr",      comp="Sensitivity", label="Sea Level Rise", type="single"),
         list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single"),
-        list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single")
+        list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single"),
+        list(id="factor_sen_drought",  comp='Sensitivity', label="Drought",  type = "single")
       )
       rpt_na_flag_for <- function(id) (grepl("runoff", id) & is_rainwater) | (grepl("precip", id) & !is_rainwater)
       rpt_safe_div <- function(num, den) { out <- num / den; out[den == 0] <- 0; out }
