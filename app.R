@@ -29,42 +29,6 @@ source("calc_vulnerability_index.R")
 ## Data Last Updated ----
 DATA_LAST_UPDATED <- format(Sys.Date(), "%B %Y")
 
-## Ocean Source Type Patch ----
-# calc_vulnerability_index.R handles rainwater zeroing (runoff <- 0).
-# This wrapper extends that logic: ocean sources get BOTH runoff AND precip
-# zeroed, then EXPOSURE/SENSITIVITY/VULNERABILITY and all ranks recalculated.
-# NOTE: also propagate this same block to calc_vulnerability_index.R directly.
-.cvi_base <- calc_vulnerability_index
-calc_vulnerability_index <- function(dat, id_cols = "wsd_source_id") {
-  result <- .cvi_base(dat, id_cols)
-  is_ocean <- !is.na(dat$source_type) & dat$source_type == "ocean"
-  if (any(is_ocean)) {
-    ocean_idx <- which(is_ocean)
-    for (col in c("factor_exp_runoff", "factor_exp_precip",
-                  "factor_sen_runoff", "factor_sen_precip")) {
-      if (col %in% names(result)) result[[col]][ocean_idx] <- 0
-    }
-    exp_cols <- c("factor_exp_runoff", "factor_exp_precip", "factor_exp_drought",
-                  "factor_exp_slr", "factor_exp_wildfire", "factor_exp_demand")
-    sen_cols <- c("factor_sen_demand", "factor_sen_wildfire", "factor_sen_flood",
-                  "factor_sen_slr", "factor_sen_runoff", "factor_sen_precip", "factor_sen_drought")
-    all_cols <- c(exp_cols, sen_cols)
-    result$EXPOSURE[ocean_idx]      <- sqrt(rowSums(result[ocean_idx, exp_cols, drop=FALSE]^2, na.rm=TRUE))
-    result$SENSITIVITY[ocean_idx]   <- sqrt(rowSums(result[ocean_idx, sen_cols, drop=FALSE]^2, na.rm=TRUE))
-    result$VULNERABILITY[ocean_idx] <- sqrt(rowSums(result[ocean_idx, all_cols, drop=FALSE]^2, na.rm=TRUE))
-    pct_rank <- function(x) rank(x, ties.method="average", na.last="keep") / sum(!is.na(x)) * 100
-    result$VULNERABILITY_rank <- round(pct_rank(result$VULNERABILITY), 1)
-    result$EXPOSURE_rank      <- round(pct_rank(result$EXPOSURE), 1)
-    result$SENSITIVITY_rank   <- round(pct_rank(result$SENSITIVITY), 1)
-    p75 <- quantile(result$VULNERABILITY, 0.75, na.rm=TRUE)
-    result$priority_group <- result$VULNERABILITY >= p75
-    q_breaks <- quantile(result$VULNERABILITY, probs = c(0,.25,.5,.75,1), na.rm=TRUE)
-    result$vulnerability_quartile <- as.integer(as.character(cut(
-      result$VULNERABILITY, breaks = q_breaks, labels = 1:4, include.lowest = TRUE
-    )))
-  }
-  result
-}
 
 # Load and simplify park boundaries, keep only name column, write to GeoJSON
 # for fast native Leaflet rendering
