@@ -863,7 +863,7 @@ ui <- navbarPage(
                tags$hr(style = "border-color:#dce8ef; margin:12px 0 16px 0;"),
                
                p(HTML("The <strong>NPS Water Supply Vulnerability Assessment Technical Report</strong> describes the full
-           methodology, data sources, and validation behind the vulnerability index scores displayed in this tool.
+           methodology and data sources behind the vulnerability index scores displayed in this tool.
            The report follows the <a href=\'https://conbio.onlinelibrary.wiley.com/doi/10.1111/con4.70020\'
            target=\'_blank\' style=\'color:#457B9D;\'>Michalak et al. (2026)</a> hierarchical Euclidean
            distance framework."),
@@ -878,7 +878,6 @@ ui <- navbarPage(
                            tags$li("Euclidean distance normalization and aggregation methodology"),
                            tags$li("Source-type conditional zeroing (rainwater, ocean sources)"),
                            tags$li("Priority classification and hazard flag thresholds"),
-                           tags$li("Validation against field observations and expert review"),
                            tags$li("Limitations and recommended uses of the vulnerability scores")
                    )
                ),
@@ -1267,6 +1266,7 @@ server <- function(input, output, session) {
       c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226")
     }
     
+    
     pal <- colorNumeric(pal_colors, domain = pal_dom, na.color = "lightgrey")
     
     legend_title <- if (input$view_mode == "score") {
@@ -1310,10 +1310,10 @@ server <- function(input, output, session) {
     
     radius_vec <- if (is_inverted) {
       ifelse(is.na(plot_vals), 3,
-             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(15,5), from=pal_dom))))
+             pmax(3, pmin(12, scales::rescale(plot_vals, to=c(12,3), from=pal_dom))))
     } else {
       ifelse(is.na(plot_vals), 3,
-             pmax(2, pmin(12, scales::rescale(plot_vals, to=c(5,15), from=pal_dom))))
+             pmax(3, pmin(12, scales::rescale(plot_vals, to=c(3,12), from=pal_dom))))
     }
     fill_vec   <- pal(plot_vals)
     
@@ -1339,9 +1339,9 @@ server <- function(input, output, session) {
     breaks <- breaks[breaks >= pal_dom[1] & breaks <= pal_dom[2]]
     
     legend_radius <- if (is_inverted) {
-      pmax(4, pmin(16, scales::rescale(breaks, to = c(15, 5), from = pal_dom)))
+      pmax(4, pmin(16, scales::rescale(breaks, to = c(16, 4), from = pal_dom)))
     } else {
-      pmax(4, pmin(16, scales::rescale(breaks, to = c(5, 15), from = pal_dom)))
+      pmax(4, pmin(16, scales::rescale(breaks, to = c(4, 16), from = pal_dom)))
     }
     legend_colors <- pal(breaks)
     
@@ -1371,11 +1371,11 @@ server <- function(input, output, session) {
         data = plot_data,
         group = "data_points",
         radius = radius_vec,
-        color = "#1D3557",
+        color = "#000000",
         fillColor = fill_vec,
-        fillOpacity = 0.75,
+        fillOpacity = 0.8,
         stroke = TRUE,
-        weight = 1,
+        weight = 1.5,
         popup = popup_vec,
         label = as.data.frame(plot_data)[["park_name"]],
         labelOptions = labelOptions(
