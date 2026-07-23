@@ -52,6 +52,15 @@ water_supplies <- read_csv("app_data/water_supplies.csv") %>%
 # Raw indicators — vulnerability scores are calculated on the fly
 final_indicators <- read_csv("app_data/final_indicators.csv")
 
+# Indicator methodology details (Data Source / Methodology / Vulnerability
+# Direction), sourced from the Technical Methods Report. One row per raw_col.
+# See app_data/indicator_details.csv — add a row there any time a new
+# indicator is added or the methods report is updated; no code change needed.
+# Indicators with no row here (e.g. not yet documented) simply show a
+# "not yet available" message in the info tooltip.
+indicator_details_raw <- read_csv("app_data/indicator_details.csv")
+indicator_details <- setNames(purrr::transpose(indicator_details_raw), indicator_details_raw$raw_col)
+
 # Join metadata + raw indicators, calculate national scores, convert to sf
 combined_raw <- water_supplies %>%
   left_join(final_indicators, by = "wsd_source_id")
@@ -465,6 +474,28 @@ ui <- navbarPage(
         margin-top: 4px;
       }
       .btn-export-map:hover { background: #1f5f5f; color: white; }
+      /* ---- Raw indicator value-range filter (top-right map overlay) ---- */
+      .map-value-filter-overlay {
+        position: absolute; top: 10px; right: 10px; z-index: 1000;
+        background: white; padding: 10px 14px; border-radius: 6px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2); width: 260px;
+      }
+      .map-value-filter-overlay .irs--shiny .irs-bar,
+      .map-value-filter-overlay .irs--shiny .irs-single,
+      .map-value-filter-overlay .irs--shiny .irs-from,
+      .map-value-filter-overlay .irs--shiny .irs-to {
+        background: #457B9D !important;
+      }
+      /* ---- Indicator description box + info button ---- */
+      .indicator-desc-box { position: relative; }
+      .indicator-info-btn {
+        position: absolute; top: 6px; right: 6px; z-index: 5;
+        background: white; border: 1.5px solid #457B9D; color: #457B9D;
+        border-radius: 50%; width: 22px; height: 22px; padding: 0;
+        font-size: 0.85rem; line-height: 1; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .indicator-info-btn:hover { background: #457B9D; color: white; }
       /* ---- WBM Explorer tab ---- */
       .wbm-header {
         background: linear-gradient(135deg, #1D3557 0%, #2a7f7f 100%);
@@ -634,17 +665,11 @@ ui <- navbarPage(
                      div(class = "view-card score-card", role = "group", `aria-labelledby` = "score-card-label",
                          div(id = "score-card-label", class = "view-card-label", HTML("<span aria-hidden='true'>&#x1F4CA;</span> Map a composite score")),
                          fluidRow(
-                           column(5,
+                           column(6,
                                   selectInput("score_view",
                                               label = tags$span("Score", style = "color:#386150; font-weight:600;"),
                                               choices = names(score_views),
                                               selected = "Relative Vulnerability Score")
-                           ),
-                           column(4,
-                                  selectInput("score_metric",
-                                              label = tags$span("Display as", style = "color:#386150; font-weight:600;"),
-                                              choices = c("Percentile Rank" = "rank", "Raw Score" = "raw"),
-                                              selected = "rank")
                            )
                          )
                      )
@@ -775,6 +800,11 @@ ui <- navbarPage(
                         #       h4(icon("spinner", class = "fa-spin"), " Loading park boundaries..."))
                         # ),
                         leafletOutput("map", height = "calc(100vh - 180px)"),
+                        conditionalPanel(
+                          condition = "input.view_mode == 'indicator'",
+                          div(class = "map-value-filter-overlay",
+                              uiOutput("indicator_range_slider_ui"))
+                        ),
                         conditionalPanel(
                           condition = "input.view_mode == 'indicator'",
                           div(
@@ -931,9 +961,13 @@ server <- function(input, output, session) {
     req(!is.null(cfg))
     border_col <- if (input$component == "Exposure") "#457B9D" else "#C05235"
     div(
+      class = "indicator-desc-box",
       style = paste0("background:#edf3f8; border-left:3px solid ", border_col, ";
-                      border-radius:4px; padding:8px 10px; font-size:1.1rem;
+                      border-radius:4px; padding:8px 30px 8px 10px; font-size:1.1rem;
                       color:#2c4a6e; line-height:1.5;"),
+      actionButton("indicator_info_btn", label = NULL, icon = icon("info-circle"),
+                   class = "btn action-button indicator-info-btn",
+                   title = "View full indicator methodology"),
       tags$strong(
         style = paste0("color:", border_col, "; font-size:1.05rem;"),
         paste0(input$component, " Indicator Description:")
@@ -948,6 +982,52 @@ server <- function(input, output, session) {
         paste0("Data Last Updated: ", DATA_LAST_UPDATED)
       )
     )
+  })
+  
+  ## Indicator Methodology Modal (info tooltip) ----
+  observeEvent(input$indicator_info_btn, {
+    req(input$component, input$factor, input$indicator)
+    cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
+    req(!is.null(cfg))
+    
+    border_col <- if (input$component == "Exposure") "#5B8C6E" else "#7C6FAD"
+    details     <- indicator_details[[cfg$raw_col]]
+    
+    body_html <- if (!is.null(details)) {
+      paste0(
+        "<table style='width:100%; border-collapse:collapse; font-size:13px;'>",
+        "<tr><td style='padding:6px 8px; font-weight:600; color:#1D3557; width:150px; vertical-align:top;'>Data Source</td>",
+        "<td style='padding:6px 8px;'>", htmltools::htmlEscape(details$data_source), "</td></tr>",
+        "<tr style='background:#f7fafc;'><td style='padding:6px 8px; font-weight:600; color:#1D3557; vertical-align:top;'>Methodology</td>",
+        "<td style='padding:6px 8px;'>", htmltools::htmlEscape(details$methodology), "</td></tr>",
+        "<tr><td style='padding:6px 8px; font-weight:600; color:#1D3557; vertical-align:top;'>Vulnerability Direction</td>",
+        "<td style='padding:6px 8px;'>", htmltools::htmlEscape(details$vulnerability_direction), "</td></tr>",
+        "</table>"
+      )
+    } else {
+      paste0(
+        "<p style='color:#999; font-style:italic; font-size:13px;'>",
+        "Detailed data source and methodology information for this indicator is not yet ",
+        "available in the Technical Methods Report reference file.</p>"
+      )
+    }
+    
+    showModal(modalDialog(
+      title = tagList(
+        icon("info-circle", style = paste0("color:", border_col, "; margin-right:6px;")),
+        input$indicator
+      ),
+      div(
+        style = paste0("border-left:4px solid ", border_col, "; padding-left:10px; margin-bottom:12px;"),
+        tags$span(style = paste0("color:", border_col, "; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.05em;"),
+                  paste0(input$component, " \u203a ", input$factor)),
+        tags$p(style = "color:#333; margin:4px 0 0 0;", cfg$description)
+      ),
+      HTML(body_html),
+      size      = "m",
+      easyClose = TRUE,
+      footer    = modalButton("Close")
+    ))
   })
   
   
@@ -1065,6 +1145,68 @@ server <- function(input, output, session) {
     df
   })
   
+  ## Raw Indicator Value-Range Slider ----
+  # Bounds are rebuilt from the current filtered_data_display() distribution every
+  # time the active indicator or an upstream filter changes, so the slider always
+  # starts covering the full range of what's "currently shown on the map."
+  output$indicator_range_slider_ui <- renderUI({
+    req(input$view_mode == "indicator", input$component, input$factor, input$indicator)
+    cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
+    req(!is.null(cfg))
+    
+    vals <- suppressWarnings(as.numeric(as.data.frame(filtered_data_display())[[cfg$raw_col]]))
+    vals <- vals[is.finite(vals)]
+    
+    if (length(vals) == 0) {
+      return(div(style = "font-size:1rem; color:#999; font-style:italic;",
+                 "No numeric values available to filter for this indicator."))
+    }
+    
+    rng <- range(vals)
+    if (rng[1] == rng[2]) rng <- rng + c(-0.5, 0.5)
+    # Round OUTWARD (min down, max up), not to-nearest. signif() rounds to
+    # nearest and can clip the true min/max inward by a hair, which silently
+    # excludes the extreme site(s) from the default full-range slider and
+    # makes the chart falsely look "filtered" before the user touches anything.
+    round_out <- function(x, direction) {
+      if (x == 0) return(0)
+      scale <- 10 ^ (floor(log10(abs(x))) - 2)
+      if (direction == "down") floor(x / scale) * scale else ceiling(x / scale) * scale
+    }
+    rng  <- c(round_out(rng[1], "down"), round_out(rng[2], "up"))
+    step <- signif(diff(rng) / 100, 2)
+    if (!is.finite(step) || step <= 0) step <- 0.01
+    
+    tagList(
+      div(style = "font-size:1.05rem; font-weight:600; color:#1D3557; margin-bottom:4px;",
+          "Filter by Value Range"),
+      sliderInput("indicator_value_range", label = NULL,
+                  min = rng[1], max = rng[2], value = c(rng[1], rng[2]),
+                  step = step, width = "100%"),
+      div(style = "font-size:0.95rem; color:#666;",
+          paste0(length(vals), " sites with data \u2022 no-data sites always shown as grey"))
+    )
+  })
+  
+  ## Map/Table Data After Value-Range Filter ----
+  # In indicator view, narrows filtered_data_display() to the slider's selected
+  # range. Sites with NA for the active indicator are always kept (shown grey) --
+  # the slider filters on value, not on data availability.
+  map_indicator_filtered_data <- reactive({
+    df <- filtered_data_display()
+    if (isTRUE(input$view_mode == "indicator") && !is.null(input$indicator_value_range)) {
+      req(input$component, input$factor, input$indicator)
+      cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
+      if (!is.null(cfg) && cfg$raw_col %in% names(df)) {
+        vals  <- suppressWarnings(as.numeric(as.data.frame(df)[[cfg$raw_col]]))
+        rng   <- input$indicator_value_range
+        keep  <- is.na(vals) | (vals >= rng[1] & vals <= rng[2])
+        df    <- df[keep, ]
+      }
+    }
+    df
+  })
+  
   # Debounce so panning doesn't re-render the table on every pixel of drag
   map_bounds_debounced <- reactive({ input$map_bounds }) %>% debounce(400)
   
@@ -1130,11 +1272,7 @@ server <- function(input, output, session) {
     req(!is.null(input$view_mode) && nchar(input$view_mode) > 0)
     if (input$view_mode == "score") {
       base_col <- score_views[[input$score_view]]
-      if (isTRUE(input$score_metric == "rank")) {
-        score_rank_cols[[base_col]]
-      } else {
-        base_col
-      }
+      score_rank_cols[[base_col]]
     } else {
       req(input$component, input$factor, input$indicator)
       cfg <- indicator_config[[input$component]][[input$factor]][[input$indicator]]
@@ -1233,7 +1371,8 @@ server <- function(input, output, session) {
         options     = pathOptions(pane = "m_h")
       ) %>% 
       addLayersControl(baseGroups = c("OpenStreetMap", "Satellite", "Terrain"),
-                       overlayGroups = "Municipal/Hauled Supplies") %>% 
+                       overlayGroups = "Municipal/Hauled Supplies",
+                       options = layersControlOptions(position = "topleft")) %>% 
       hideGroup("Municipal/Hauled Supplies")
   })
   
@@ -1241,7 +1380,7 @@ server <- function(input, output, session) {
   observe({
     req(active_column())
     col       <- active_column()
-    plot_data <- filtered_data_display()
+    plot_data <- map_indicator_filtered_data()
     req(col %in% names(plot_data))
     
     vals    <- as.numeric(as.data.frame(plot_data)[[col]])
@@ -1252,7 +1391,7 @@ server <- function(input, output, session) {
     if (val_rng[1] == val_rng[2]) val_rng <- c(val_rng[1] - 0.001, val_rng[2] + 0.001)
     
     # Determine palette domain
-    is_rank <- (input$view_mode == "score" && isTRUE(input$score_metric == "rank"))
+    is_rank <- (input$view_mode == "score")
     pal_dom <- if (is_rank) c(0, 100) else val_rng
     
     # Columns where lower raw values = higher vulnerability (invert color scale)
@@ -1270,8 +1409,7 @@ server <- function(input, output, session) {
     pal <- colorNumeric(pal_colors, domain = pal_dom, na.color = "lightgrey")
     
     legend_title <- if (input$view_mode == "score") {
-      suffix <- if (is_rank) "\n(Percentile Rank)" else "\n(Raw Score)"
-      paste0(str_wrap(input$score_view, 20), suffix)
+      paste0(str_wrap(input$score_view, 20), "\n(Percentile Rank)")
     } else {
       str_wrap(input$indicator, 20)
     }
@@ -1355,9 +1493,19 @@ server <- function(input, output, session) {
       collapse = ""
     )
     
+    legend_component_label <- if (is_ind) {
+      comp_color <- if (input$component == "Exposure") "#5B8C6E" else "#7C6FAD"
+      paste0(
+        "<div style='font-weight:700;font-size:11px;text-transform:uppercase;",
+        "letter-spacing:0.05em;color:", comp_color, ";margin-bottom:3px;'>",
+        input$component, "</div>"
+      )
+    } else ""
+    
     legend_html <- paste0(
       "<div style='background:white;padding:8px 10px;border-radius:6px;",
       "box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:12px;max-width:180px;'>",
+      legend_component_label,
       "<div style='font-weight:600;margin-bottom:6px;'>", gsub("\n", "<br/>", legend_title), "</div>",
       legend_rows,
       "</div>"
@@ -1398,7 +1546,7 @@ server <- function(input, output, session) {
     # )
   })
   
-
+  
   
   ## Marker Click: Site Chart Modal ----
   clicked_site <- reactiveVal(NULL)
@@ -1439,7 +1587,7 @@ server <- function(input, output, session) {
     bin_edges <- seq(x_range[1], x_range[2], length.out = n_bins + 1)
     bin_size  <- diff(bin_edges)[1]
     
-    filt_df     <- as.data.frame(filtered_data_display())
+    filt_df     <- as.data.frame(map_indicator_filtered_data())
     is_filtered <- nrow(filt_df) < nrow(nat_df)
     filt_vals   <- if (is_filtered && raw_col %in% names(filt_df)) {
       v <- suppressWarnings(as.numeric(filt_df[[raw_col]])); v[is.finite(v)]
@@ -1551,7 +1699,7 @@ server <- function(input, output, session) {
       cfg$raw_label, length(nat_vals), signif(min(nat_vals), 3), signif(max(nat_vals), 3), signif(mean(nat_vals), 3)
     )
     
-    filt_df   <- as.data.frame(filtered_data_display())
+    filt_df   <- as.data.frame(map_indicator_filtered_data())
     filt_vals <- if (nrow(filt_df) < nrow(nat_df) && raw_col %in% names(filt_df)) {
       v <- suppressWarnings(as.numeric(filt_df[[raw_col]])); v[is.finite(v)]
     } else {
@@ -2431,7 +2579,7 @@ server <- function(input, output, session) {
     )
     tryCatch({
       col       <- active_column()
-      df_sf     <- filtered_data_display()
+      df_sf     <- map_indicator_filtered_data()
       df        <- as.data.frame(df_sf)
       n_sites   <- nrow(df)
       
@@ -2443,7 +2591,7 @@ server <- function(input, output, session) {
       # ---- Metadata strings ----
       if (input$view_mode == "score") {
         map_title    <- input$score_view
-        map_subtitle <- if (input$score_metric == "rank") "Percentile Rank" else "Raw Score"
+        map_subtitle <- "Percentile Rank"
         comp_color   <- if (grepl("Exposure", map_title)) "#457B9D"
         else if (grepl("Sensitivity", map_title)) "#C05235" else "#386150"
       } else {
@@ -2478,7 +2626,7 @@ server <- function(input, output, session) {
       pal_colors <- if (is_inverted) rev(c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226"))
       else                  c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226")
       
-      is_rank    <- (input$view_mode == "score" && isTRUE(input$score_metric == "rank"))
+      is_rank    <- (input$view_mode == "score")
       clr_range  <- if (is_rank) c(0, 100) else range(val_finite, na.rm=TRUE)
       if (diff(clr_range) == 0) clr_range <- c(clr_range[1] - 0.001, clr_range[2] + 0.001)
       
@@ -2598,7 +2746,7 @@ server <- function(input, output, session) {
     req(map_bounds_debounced())
     bounds <- map_bounds_debounced()
     
-    base_data <- filtered_data_display()
+    base_data <- map_indicator_filtered_data()
     coords    <- st_coordinates(base_data)
     in_view   <- coords[, 1] >= bounds$west  & coords[, 1] <= bounds$east &
       coords[, 2] >= bounds$south & coords[, 2] <= bounds$north
@@ -2607,8 +2755,7 @@ server <- function(input, output, session) {
       select(wsd_source_id, water_system_name,
              park_unit, park_name, state, region,
              source_type,
-             VULNERABILITY, VULNERABILITY_rank, EXPOSURE, EXPOSURE_rank,
-             SENSITIVITY, SENSITIVITY_rank,
+             VULNERABILITY_rank, EXPOSURE_rank, SENSITIVITY_rank,
              vulnerability_quartile,
              any_of(names(factor_labels)),
              starts_with("norm_"),
@@ -2627,11 +2774,11 @@ server <- function(input, output, session) {
       ) %>%
       select(-priority_group, -flag_fire, -flag_flood, -flag_slr, -flag_drought)
     
-    #vuln_max <- max(df$VULNERABILITY, na.rm = TRUE)
+    #vuln_max <- max(df$VULNERABILITY_rank, na.rm = TRUE)
     
-    # Move priority_flags to be right after the score columns, before indicator columns
+    # Move priority_flags to be right after the ID/geo columns, before score columns
     df <- df %>%
-      relocate(priority_flags, .before = VULNERABILITY)
+      relocate(priority_flags, .before = VULNERABILITY_rank)
     
     # Store the wsd_source_id vector in the SAME row order DT will receive
     # (server=TRUE means DT row indices map to this ordering)
@@ -2649,16 +2796,16 @@ server <- function(input, output, session) {
                 scrollY        = "400px",
                 scrollX        = TRUE,
                 scrollCollapse = TRUE,
-                order          = list(list(which(names(df) == "VULNERABILITY") - 1, "desc")),                dom            = "Bfrtip",
+                order          = list(list(which(names(df) == "VULNERABILITY_rank") - 1, "desc")),                dom            = "Bfrtip",
                 buttons        = list("csv", "excel"),
                 columnDefs     = list(
                   list(className = "dt-center", targets = "_all"),
-                  list(width = "120px", targets = 0:5),   # ID/name cols
-                  list(width = "80px",  targets = 6:12),  # score cols
-                  list(width = "300px", targets = 13)     # flags col
+                  list(width = "120px", targets = 0:6),   # ID/name/geo/type cols
+                  list(width = "300px", targets = 7),     # flags col
+                  list(width = "80px",  targets = 8:11)   # score + quartile cols
                 )
               )) #%>% 
-    # formatStyle("VULNERABILITY",
+    # formatStyle("VULNERABILITY_rank",
     #             background         = styleColorBar(c(0, vuln_max), "#C05235"),
     #             backgroundSize     = "100% 80%",
     #             backgroundRepeat   = "no-repeat",
@@ -2675,8 +2822,8 @@ server <- function(input, output, session) {
     
     top_section <- if (view_mode == "score") {
       paste0("<b style='color:#386150; font-size:14px;'>", score_label, "</b><br>",
-             "<b>Value:</b> <span style='font-size:14px; font-weight:bold;'>",
-             round(col_value, 3), "</span>")
+             "<b>Percentile Rank:</b> <span style='font-size:14px; font-weight:bold;'>",
+             round(col_value, 1), "%</span>")
     } else {
       raw_row <- if (!is.na(raw_value)) {
         paste0(
