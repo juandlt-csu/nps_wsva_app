@@ -171,13 +171,13 @@ indicator_config <- list(
         description = "Trend in nearby county water use (competition for supply)"
       )
     ),
-    # "Water Supply" = list(
-    #   "Water Supply Type" = list(
-    #     col = "norm_sen_water_supply_type", raw_col = "sen_water_supply_type",
-    #     raw_label = "Source type vulnerability (ordinal)",
-    #     description = "Water supply source type vulnerability rating"
-    #   )
-    # ),
+    "Water Supply" = list(
+      "Source Type" = list(
+        col = "norm_sen_source_type", raw_col = "sen_source_type",
+        raw_label = "Groundwater depth (m) of the water source",
+        description = "Vulnerability is characterized as groundwater depth (m), with deeper depths representing systems of lower risk."
+      )
+    ),
     "Wildfire" = list(
       "Current Wildfire Risk" = list(
         col = "norm_sen_wildfire_hazard", raw_col = "sen_wildfire_hazard",
@@ -246,7 +246,7 @@ factor_labels <- c(
   "factor_exp_wildfire"     = "Wildfire\n(Exp)",
   "factor_exp_demand"       = "Demand\n(Exp)",
   "factor_sen_demand"       = "Demand\n(Sen)",
-  #"factor_sen_water_supply" = "Supply\n(Sen)",
+  "factor_sen_infrastructure" = "Supply\n(Sen)",
   "factor_sen_wildfire"     = "Wildfire\n(Sen)",
   "factor_sen_flood"        = "Flood\n(Sen)",
   "factor_sen_slr"          = "Sea Level Rise\n(Sen)",
@@ -973,7 +973,7 @@ server <- function(input, output, session) {
         paste0(input$component, " Indicator Description:")
       ),
       tags$br(),
-      span(cfg$description, style = "color:#333; font-size:1.1rem;"),
+      tags$span(cfg$description, style = "color:#333; font-size:1.1rem;"),
       tags$hr(style = "margin:6px 0; border-color:#c1d5e0;"),
       div(
         style = "background:#e8f4f0; border-left:2px solid #2a7f7f; border-radius:3px;
@@ -1396,7 +1396,7 @@ server <- function(input, output, session) {
     
     # Columns where lower raw values = higher vulnerability (invert color scale)
     invert_raw_cols <- c("exp_runoff_change", "exp_precip_change", "exp_drought_change",
-                         "sen_runoff_trend", "sen_precip_trend")
+                         "sen_runoff_trend", "sen_precip_trend", "sen_drought_trend", "sen_source_type")
     is_inverted <- (input$view_mode == "indicator") && col %in% invert_raw_cols
     
     pal_colors <- if (is_inverted) {
@@ -1822,7 +1822,8 @@ server <- function(input, output, session) {
       list(id="factor_sen_slr",      comp="Sensitivity", label="Sea Level Rise",      type="single"),
       list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single"),
       list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single"),
-      list(id="factor_sen_drought",  comp="Sensitivity", label="Drought", type="single")
+      list(id="factor_sen_drought",  comp="Sensitivity", label="Drought", type="single"),
+      list(id ="factor_sen_infrastructure", comp="Sensitivity", label="Supply", type="single")
     )
     na_flag_for <- function(id) {
       if (is_ocean) {
@@ -2098,7 +2099,7 @@ server <- function(input, output, session) {
         list(id="factor_exp_runoff",   comp="Exposure",    label="Runoff",   type="single"),
         list(id="factor_exp_precip",   comp="Exposure",    label="Precip",   type="single"),
         list(id="factor_exp_drought",  comp="Exposure",    label="Drought",  type="single"),
-        list(id="factor_exp_drought",  comp="Exposure",    label="Demand",   type="single"),
+        list(id="factor_exp_demand",  comp="Exposure",    label="Demand",   type="single"),
         list(id="factor_exp_slr",      comp="Exposure",    label="Sea Level Rise", type="euclidean",
              indicators=list(
                list(norm_col="norm_exp_inundation_slr", label="Inundation"),
@@ -2116,7 +2117,8 @@ server <- function(input, output, session) {
         list(id="factor_sen_slr",      comp="Sensitivity", label="Sea Level Rise", type="single"),
         list(id="factor_sen_runoff",   comp="Sensitivity", label="Runoff",   type="single"),
         list(id="factor_sen_precip",   comp="Sensitivity", label="Precip",   type="single"),
-        list(id="factor_sen_drought",  comp='Sensitivity', label="Drought",  type = "single")
+        list(id="factor_sen_drought",  comp='Sensitivity', label="Drought",  type = "single"),
+        list(id="factor_sen_infrastructure", comp="Sensitivity", label="Supply", type = "single")
       )
       rpt_na_flag_for <- function(id) {
         if (is_ocean) {
@@ -2620,7 +2622,7 @@ server <- function(input, output, session) {
       val_finite <- vals[is.finite(vals)]
       
       invert_raw_cols <- c("exp_runoff_change","exp_precip_change","exp_drought_change",
-                           "sen_runoff_trend","sen_precip_trend")
+                           "sen_runoff_trend","sen_precip_trend", "sen_source_type", "sen_drought_trend")
       is_inverted <- (input$view_mode == "indicator") && col %in% invert_raw_cols
       
       pal_colors <- if (is_inverted) rev(c("#FFF3D6","#F0C75E","#DD8844","#C05235","#9B2226"))
