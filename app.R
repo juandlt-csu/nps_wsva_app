@@ -1329,7 +1329,7 @@ server <- function(input, output, session) {
   output$map <- renderLeaflet({
     leaflet() %>%
       addProviderTiles(providers$OpenStreetMap, group = "OpenStreetMap") %>%
-      addProviderTiles(providers$Esri.WorldTopoMap, group = "Topo") %>% 
+      addProviderTiles(providers$Esri.WorldTopoMap, group = "Terrain") %>% 
       addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>% 
       setView(lng = -98.5, lat = 37, zoom = 4) %>%
       addMapPane("background", zIndex = 410) %>%
