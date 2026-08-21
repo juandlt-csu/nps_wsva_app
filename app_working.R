@@ -39,6 +39,14 @@ FEEDBACK_GITHUB_URL <- "https://github.com/rossyndicate/nps_water_vulnerability/
 FEEDBACK_LOG        <- file.path("app_data", "feedback_log.csv")
 APP_VERSION         <- "2026-08 review build"
 
+## Public App URL ----
+# Stamped into the footer of every report and map export so a PDF that has been
+# forwarded around still says where it came from and can be regenerated. Update
+# here if the deployment moves; the report footer, the map export caption and
+# anything added later all read from this one place.
+APP_URL         <- "https://apps.gis.colostate.edu/WSVA_tool/"
+APP_URL_DISPLAY <- "apps.gis.colostate.edu/WSVA_tool/"
+
 
 
 # Load and simplify park boundaries, keep only name column, write to GeoJSON
@@ -520,16 +528,16 @@ build_contrib_chart_b64 <- function(site_row, src_type) {
     contrib_df$status == "scored", sprintf("%.0f%%", contrib_df$contrib),
     ifelse(contrib_df$status == "n/a", "N/A", "No data"))
   contrib_df$order_key <- with(contrib_df,
-    ifelse(component == "Exposure", 1, 2) * 1000 - ifelse(is.na(bar_x), 0, bar_x))
+                               ifelse(component == "Exposure", 1, 2) * 1000 - ifelse(is.na(bar_x), 0, bar_x))
   contrib_df <- contrib_df[order(contrib_df$order_key), ]
   contrib_df$display_label <- factor(contrib_df$display_label,
                                      levels = rev(contrib_df$display_label))
-
+  
   ymax <- max(contrib_df$bar_x, na.rm = TRUE)
   if (!is.finite(ymax) || ymax <= 0) ymax <- 1
-
+  
   p <- ggplot2::ggplot(contrib_df,
-         ggplot2::aes(x = display_label, y = bar_x, fill = fill_color)) +
+                       ggplot2::aes(x = display_label, y = bar_x, fill = fill_color)) +
     ggplot2::geom_col(width = 0.65) +
     ggplot2::geom_text(ggplot2::aes(label = bar_label), hjust = -0.1,
                        size = 3.2, color = "#333333") +
@@ -545,7 +553,7 @@ build_contrib_chart_b64 <- function(site_row, src_type) {
       plot.background    = ggplot2::element_rect(fill = "white", color = NA),
       panel.background   = ggplot2::element_rect(fill = "white", color = NA)
     )
-
+  
   f <- tempfile(fileext = ".png")
   ggplot2::ggsave(f, p, width = 7.5, height = 5.2, dpi = 150, bg = "white")
   base64enc::base64encode(f)
@@ -560,7 +568,7 @@ build_icicle_assets <- function(site_row, src_type) {
     parents <<- c(parents, parent); values <<- c(values, value)
     colors  <<- c(colors, color);   levels_ <<- c(levels_, level)
   }
-
+  
   exp_defs <- Filter(function(d) d$comp == "Exposure",    report_factor_defs)
   sen_defs <- Filter(function(d) d$comp == "Sensitivity", report_factor_defs)
   exp_vals <- as.numeric(site_row[1, sapply(exp_defs, function(d) d$id)])
@@ -570,11 +578,11 @@ build_icicle_assets <- function(site_row, src_type) {
   vuln_denom <- site_row$EXPOSURE[1]^2 + site_row$SENSITIVITY[1]^2
   exp_share <- 100 * rpt_safe_div(site_row$EXPOSURE[1]^2, vuln_denom)
   sen_share <- 100 * rpt_safe_div(site_row$SENSITIVITY[1]^2, vuln_denom)
-
+  
   ic_add("Vulnerability", "Vulnerability", "", 100, RPT_VULN_COLOR, 0)
   ic_add("Exposure", "Exposure", "Vulnerability", exp_share, RPT_EXP_COLOR, 1)
   ic_add("Sensitivity", "Sensitivity", "Vulnerability", sen_share, RPT_SEN_COLOR, 1)
-
+  
   place <- function(defs, vals, denom, comp_id, comp_share, color) {
     scored <- !sapply(defs, function(d) na_flag_for_source(d$id, src_type)) & !is.na(vals)
     for (i in seq_along(defs)) {
@@ -601,13 +609,13 @@ build_icicle_assets <- function(site_row, src_type) {
   }
   place(exp_defs, exp_vals, exp_denom, "Exposure",    exp_share, RPT_EXP_COLOR)
   place(sen_defs, sen_vals, sen_denom, "Sensitivity", sen_share, RPT_SEN_COLOR)
-
+  
   tree <- data.frame(id = ids, label = labels, parent = parents, value = values,
                      color = colors, level = levels_, stringsAsFactors = FALSE)
   tree$y0 <- NA_real_; tree$y1 <- NA_real_
   root_idx <- which(tree$parent == "")
   tree$y0[root_idx] <- 0; tree$y1[root_idx] <- 100
-
+  
   recurse <- function(tr, parent_id) {
     kids <- which(tr$parent == parent_id)
     if (length(kids) == 0) return(tr)
@@ -625,7 +633,7 @@ build_icicle_assets <- function(site_row, src_type) {
   tree <- recurse(tree, tree$id[root_idx])
   tree$y0 <- pmin(pmax(tree$y0, 0), 100)
   tree$y1 <- pmin(pmax(tree$y1, 0), 100)
-
+  
   col_bounds <- list("0" = c(0.78, 1.0), "1" = c(0.52, 0.76),
                      "2" = c(0.26, 0.50), "3" = c(0.0, 0.24))
   bounds <- do.call(rbind, col_bounds[as.character(tree$level)])
@@ -635,7 +643,7 @@ build_icicle_assets <- function(site_row, src_type) {
   tree$label_only <- ifelse(
     tree$box_height >= 8, sprintf("%s\n%.1f%%", tree$label, tree$value),
     ifelse(tree$show_label, sprintf("%s %.0f%%", tree$label, tree$value), ""))
-
+  
   p <- ggplot2::ggplot(tree) +
     ggplot2::geom_rect(ggplot2::aes(xmin = xmin, xmax = xmax, ymin = y0, ymax = y1,
                                     fill = color), color = "white", linewidth = 0.6) +
@@ -658,10 +666,10 @@ build_icicle_assets <- function(site_row, src_type) {
       plot.background  = ggplot2::element_rect(fill = "white", color = NA),
       panel.background = ggplot2::element_rect(fill = "white", color = NA)
     )
-
+  
   f <- tempfile(fileext = ".png")
   ggplot2::ggsave(f, p, width = 8, height = 4.6, dpi = 150, bg = "white")
-
+  
   tbl_rows <- tree[tree$level %in% c(2, 3), ]
   tbl_rows <- tbl_rows[order(match(tbl_rows$parent, c("Exposure", "Sensitivity")),
                              -tbl_rows$value), ]
@@ -676,8 +684,283 @@ build_icicle_assets <- function(site_row, src_type) {
            "<td style='padding:4px 8px;text-align:right;'>",
            sprintf("%.2f%%", tbl_rows$value), "</td></tr>", collapse = ""),
     "</tbody></table>")
-
+  
   list(b64 = base64enc::base64encode(f), table_html = tbl_html)
+}
+
+## Report maps ----
+# Point coordinates for the report maps. combined_data is an sf object, so the
+# geometry is pulled once here rather than round-tripping through the data
+# frames the report builders already work with.
+report_site_coords <- function(ids) {
+  idx <- match(as.character(ids), as.character(combined_data$wsd_source_id))
+  xy  <- sf::st_coordinates(combined_data)
+  data.frame(wsd_source_id = as.character(ids),
+             lon = xy[idx, 1], lat = xy[idx, 2],
+             stringsAsFactors = FALSE)
+}
+
+# State outlines, fetched once per session. maps:: is already a soft dependency
+# of the map-export feature and is wrapped the same way, so a missing package
+# degrades to a map without a basemap rather than a failed report.
+report_states_sf <- local({
+  cached <- NULL
+  function() {
+    if (!is.null(cached)) return(cached)
+    cached <<- tryCatch({
+      sf::st_as_sf(maps::map("state", fill = TRUE, plot = FALSE)) %>% sf::st_set_crs(4326)
+    }, error = function(e) NA)
+    if (identical(cached, NA)) NULL else cached
+  }
+})
+
+# Park polygon lookup. park_boundaries carries UNIT_NAME (the long park name),
+# so matching is on park_name rather than the 4-letter unit code.
+report_park_boundary <- function(park_name) {
+  if (is.null(park_name) || is.na(park_name)) return(NULL)
+  hit <- tryCatch(park_boundaries[park_boundaries$UNIT_NAME == park_name, ],
+                  error = function(e) NULL)
+  if (is.null(hit) || nrow(hit) == 0) NULL else hit
+}
+
+#' North arrow and scale bar layers for a geographic ggplot.
+#'
+#' Hand-built rather than pulled from ggspatial: the app already ships a long
+#' dependency list to shinyapps.io, and adding a package for two decorations is
+#' a deploy risk out of proportion to the payoff. These are plain annotate()
+#' layers, so they work anywhere ggplot2 does.
+#'
+#' Both shapes are sized in DATA units (degrees), which matters because coord_sf
+#' applies a latitude-dependent aspect ratio to geographic coordinates. A shape
+#' defined as a square in degrees renders as a tall rectangle. Every horizontal
+#' dimension is therefore divided by cos(latitude) so the arrow reads as the
+#' intended shape at any latitude in CONUS, from south Florida to the Canadian
+#' border.
+#'
+#' @param xlim,ylim  the same limits handed to coord_sf
+#' @param deco_scale text and shape multiplier; drop below 1 for small panels
+map_decorations <- function(xlim, ylim, deco_scale = 1,
+                            arrow = TRUE, scalebar = TRUE) {
+  if (!all(is.finite(c(xlim, ylim)))) return(list())
+  dx <- diff(xlim); dy <- diff(ylim)
+  if (!is.finite(dx) || !is.finite(dy) || dx <= 0 || dy <= 0) return(list())
+  
+  lat_mid <- mean(ylim)
+  # Guard against a degenerate cosine near the poles; irrelevant for CONUS but
+  # cheap, and it keeps the helper safe if the tool is ever extended to Alaska.
+  cosl <- max(cos(lat_mid * pi / 180), 0.15)
+  
+  ink   <- "#1D3557"
+  layers <- list()
+  
+  ## Scale bar (bottom left) ----
+  if (isTRUE(scalebar)) {
+    span_km <- dx * 111.320 * cosl
+    target  <- span_km * 0.25
+    # Round DOWN to a conventional bar length so the label is always a clean
+    # number; a bar labelled "37 km" looks like a bug even when it is accurate.
+    nice <- c(0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 200, 250, 500, 1000, 2000)
+    ok   <- nice[nice <= target]
+    bar_km  <- if (length(ok)) max(ok) else min(nice)
+    bar_deg <- bar_km / (111.320 * cosl)
+    # Never let the bar run past the panel if the extent is tiny.
+    bar_deg <- min(bar_deg, dx * 0.42)
+    
+    x0 <- xlim[1] + dx * 0.05
+    y0 <- ylim[1] + dy * 0.06
+    h  <- dy * 0.014
+    xm <- x0 + bar_deg / 2
+    x1 <- x0 + bar_deg
+    lbl <- if (bar_km < 1) paste0(bar_km, " km") else paste0(round(bar_km), " km")
+    
+    layers <- c(layers, list(
+      # Backdrop so the bar stays readable over dark markers or a park polygon.
+      ggplot2::annotate("rect",
+                        xmin = x0 - dx * 0.018, xmax = x1 + dx * 0.035,
+                        ymin = y0 - dy * 0.028, ymax = y0 + h + dy * 0.062,
+                        fill = "white", alpha = 0.72, color = NA),
+      ggplot2::annotate("rect", xmin = x0, xmax = xm, ymin = y0, ymax = y0 + h,
+                        fill = ink, color = ink, linewidth = 0.3),
+      ggplot2::annotate("rect", xmin = xm, xmax = x1, ymin = y0, ymax = y0 + h,
+                        fill = "white", color = ink, linewidth = 0.3),
+      ggplot2::annotate("text", x = x0, y = y0 + h + dy * 0.028, label = "0",
+                        size = 2.2 * deco_scale, color = ink, hjust = 0.5),
+      ggplot2::annotate("text", x = x1, y = y0 + h + dy * 0.028, label = lbl,
+                        size = 2.2 * deco_scale, color = ink, hjust = 0.5)
+    ))
+  }
+  
+  ## North arrow (bottom right) ----
+  if (isTRUE(arrow)) {
+    ah <- dy * 0.08                 # visual height, in latitude degrees
+    aw <- (ah * 0.52) / cosl        # width corrected for the coord_sf aspect
+    cx <- xlim[2] - dx * 0.07
+    cy <- ylim[1] + dy * 0.06
+    
+    layers <- c(layers, list(
+      ggplot2::annotate("rect",
+                        xmin = cx - aw * 0.85, xmax = cx + aw * 0.85,
+                        ymin = cy - dy * 0.022, ymax = cy + ah + dy * 0.075,
+                        fill = "white", alpha = 0.72, color = NA),
+      # Kite arrowhead: apex, left foot, centre notch, right foot.
+      ggplot2::annotate("polygon",
+                        x = c(cx, cx - aw / 2, cx, cx + aw / 2),
+                        y = c(cy + ah, cy, cy + ah * 0.3, cy),
+                        fill = ink, color = ink, linewidth = 0.3),
+      ggplot2::annotate("text", x = cx, y = cy + ah + dy * 0.036, label = "N",
+                        size = 2.7 * deco_scale, fontface = "bold", color = ink)
+    ))
+  }
+  
+  layers
+}
+
+#' Vulnerability map for one set of water supplies, zoomed to their extent.
+#'
+#' @param pts_df   scored data frame containing wsd_source_id and rank_col
+#' @param rank_col which percentile rank drives colour and size
+#' @param legend_name label for the colour bar
+build_vulnerability_map_b64 <- function(pts_df, rank_col = "VULNERABILITY_rank",
+                                        title = NULL, subtitle = NULL,
+                                        park_name = NULL, legend_name = "Vulnerability\npercentile",
+                                        width = 7.5, height = 5.5,
+                                        show_labels = TRUE, show_legend = TRUE,
+                                        deco_scale = 1) {
+  d <- as.data.frame(pts_df)
+  co <- report_site_coords(d$wsd_source_id)
+  d  <- merge(d, co, by = "wsd_source_id", all.x = TRUE)
+  d$rank_val <- suppressWarnings(as.numeric(d[[rank_col]]))
+  d <- d[is.finite(d$lon) & is.finite(d$lat), ]
+  if (nrow(d) == 0) return(NULL)
+  
+  bnd <- report_park_boundary(park_name)
+  
+  # Extent: points plus any park polygon, padded. The minimum span keeps a park
+  # with a single supply (or several nearly co-located ones) from zooming to a
+  # degenerate window where the basemap renders as flat colour.
+  xr <- range(d$lon); yr <- range(d$lat)
+  if (!is.null(bnd)) {
+    bb <- sf::st_bbox(bnd)
+    xr <- range(c(xr, bb[["xmin"]], bb[["xmax"]]))
+    yr <- range(c(yr, bb[["ymin"]], bb[["ymax"]]))
+  }
+  pad_x <- max(diff(xr) * 0.18, 0.05)
+  pad_y <- max(diff(yr) * 0.18, 0.05)
+  xlim  <- c(xr[1] - pad_x, xr[2] + pad_x)
+  ylim  <- c(yr[1] - pad_y, yr[2] + pad_y)
+  
+  p <- ggplot2::ggplot()
+  st <- report_states_sf()
+  if (!is.null(st)) {
+    p <- p + ggplot2::geom_sf(data = st, fill = "#eef3f7", color = "#c4cfd7",
+                              linewidth = 0.3, inherit.aes = FALSE)
+  }
+  if (!is.null(bnd)) {
+    p <- p + ggplot2::geom_sf(data = bnd, fill = "#A8DADC", alpha = 0.28,
+                              color = "#1D3557", linewidth = 0.45, inherit.aes = FALSE)
+  }
+  
+  p <- p +
+    ggplot2::geom_point(
+      data = d[is.na(d$rank_val), , drop = FALSE],
+      ggplot2::aes(x = lon, y = lat),
+      shape = 21, fill = "#d9d9d9", color = "#666666", size = 2.4, stroke = 0.4) +
+    ggplot2::geom_point(
+      data = d[!is.na(d$rank_val), , drop = FALSE],
+      ggplot2::aes(x = lon, y = lat, fill = rank_val, size = rank_val),
+      shape = 21, color = "black", stroke = 0.45, alpha = 0.92) +
+    ggplot2::scale_fill_gradientn(
+      colors = c("#FFF3D6", "#F0C75E", "#DD8844", "#C05235", "#9B2226"),
+      limits = c(0, 100), na.value = "#d9d9d9", name = legend_name,
+      guide = if (show_legend)
+        ggplot2::guide_colorbar(barwidth = 0.7, barheight = 7, title.position = "top")
+      else "none") +
+    ggplot2::scale_size_continuous(range = c(2.2, 6.5), limits = c(0, 100), guide = "none")
+  
+  # Labels only when they will be legible; beyond ~20 supplies they collapse
+  # into a smear and the accompanying table is the better reference anyway.
+  if (show_labels && nrow(d) <= 20) {
+    p <- p + ggplot2::geom_text(
+      data = d, ggplot2::aes(x = lon, y = lat, label = wsd_source_id),
+      size = 2.1, vjust = -1.1, color = "#1D3557", check_overlap = TRUE)
+  }
+  
+  # Added after the data layers so the decorations sit on top of the markers,
+  # and before coord_sf, which then clips them to the same extent.
+  p <- p + map_decorations(xlim, ylim, deco_scale = deco_scale)
+  
+  p <- p +
+    ggplot2::coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+    ggplot2::labs(x = NULL, y = NULL, title = title, subtitle = subtitle) +
+    ggplot2::theme_minimal(base_size = 10) +
+    ggplot2::theme(
+      plot.title       = ggplot2::element_text(size = 11, face = "bold", color = "#1D3557"),
+      plot.subtitle    = ggplot2::element_text(size = 8.5, color = "#696969"),
+      axis.text        = ggplot2::element_text(size = 7, color = "#999"),
+      panel.grid.major = ggplot2::element_line(color = "#e8e8e8", linewidth = 0.25),
+      panel.border     = ggplot2::element_rect(color = "#bbb", fill = NA, linewidth = 0.4),
+      legend.title     = ggplot2::element_text(size = 8, face = "bold"),
+      legend.text      = ggplot2::element_text(size = 7.5),
+      plot.background  = ggplot2::element_rect(fill = "white", color = NA),
+      panel.background = ggplot2::element_rect(fill = "#f7fbfd", color = NA)
+    )
+  
+  f <- tempfile(fileext = ".png")
+  ggplot2::ggsave(f, p, width = width, height = height, dpi = 150,
+                  bg = "white", limitsize = FALSE)
+  base64enc::base64encode(f)
+}
+
+#' Small-multiple grid of per-park maps.
+#'
+#' ggplot2's facet_wrap cannot give each panel its own geographic extent when
+#' coord_sf is in play (free scales and a fixed CRS aspect ratio fight each
+#' other), so each park is rendered as its own plot and the "facetting" is done
+#' with a CSS grid in the report. Every panel shares one colour scale fixed to
+#' 0-100 national percentile, so panels stay comparable to each other.
+build_park_facet_maps_html <- function(scored_sub, park_codes, max_panels = 12) {
+  park_codes <- park_codes[park_codes %in% unique(scored_sub$park_unit)]
+  truncated  <- length(park_codes) > max_panels
+  shown      <- utils::head(park_codes, max_panels)
+  
+  panels <- vapply(shown, function(pu) {
+    d <- scored_sub[!is.na(scored_sub$park_unit) & scored_sub$park_unit == pu, ]
+    if (nrow(d) == 0) return("")
+    b64 <- tryCatch(
+      build_vulnerability_map_b64(
+        d, rank_col = "VULNERABILITY_rank",
+        title = paste0(pu, "  (n = ", nrow(d), ")"),
+        park_name = d$park_name[1],
+        width = 4.6, height = 3.6,
+        show_labels = FALSE, show_legend = FALSE, deco_scale = 0.8),
+      error = function(e) NULL)
+    if (is.null(b64)) {
+      return(paste0("<div style='background:#f7fafc;border:1px dashed #c1d5e0;border-radius:6px;",
+                    "padding:20px;text-align:center;font-size:11px;color:#999;'>",
+                    htmltools::htmlEscape(pu), ": map unavailable</div>"))
+    }
+    paste0("<div style='background:white;border:1px solid #dce8ef;border-radius:6px;padding:6px;'>",
+           "<img src='data:image/png;base64,", b64, "' style='width:100%;display:block;' /></div>")
+  }, character(1))
+  
+  # One shared legend strip, since the panels themselves suppress theirs.
+  legend_strip <- paste0(
+    "<div style='display:flex;align-items:center;gap:8px;margin:10px 0 4px 0;font-size:11px;color:#555;'>",
+    "<span>Less vulnerable</span>",
+    "<span style='flex:0 0 180px;height:12px;border:1px solid #bbb;border-radius:3px;",
+    "background:linear-gradient(90deg,#FFF3D6,#F0C75E,#DD8844,#C05235,#9B2226);'></span>",
+    "<span>More vulnerable</span>",
+    "<span style='margin-left:10px;'>National vulnerability percentile (0-100), shared across all panels</span>",
+    "</div>")
+  
+  paste0(
+    legend_strip,
+    "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:10px 0;'>",
+    paste(panels, collapse = ""), "</div>",
+    if (truncated) paste0(
+      "<p style='font-size:11px;color:#8B6914;'>Showing the first ", max_panels,
+      " of ", length(park_codes), " selected park units to keep the report readable. ",
+      "The tables above cover every selected park.</p>") else "")
 }
 
 ## Shared report stylesheet ----
@@ -700,6 +983,8 @@ report_css <- function() paste0(
   ".cmp-table td.l{text-align:left;}",
   ".note{background:#fff8e6;border-left:3px solid #8B6914;border-radius:4px;padding:10px 14px;font-size:12px;color:#5a4a1a;margin:14px 0;}",
   ".footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;text-align:center;font-size:11px;color:#999;}",
+  ".footer a{color:#457B9D;text-decoration:none;}",
+  ".footer a:hover{text-decoration:underline;}",
   ".page-break{page-break-before:always;}",
   "@media print{body{padding:20px;}}",
   "</style>")
@@ -707,7 +992,8 @@ report_css <- function() paste0(
 report_footer <- function() paste0(
   "<div class='footer'>",
   "NPS Water Supply Vulnerability Assessment Tool<br>",
-  "Scores calculated using the Michalak et al. (2026) Euclidean distance framework<br>",
+  "Generated from <a href='", APP_URL, "'>", APP_URL_DISPLAY, "</a> on ",
+  format(Sys.Date(), "%B %d, %Y"), "<br>",
   "Colorado State University Geospatial Centroid &nbsp;|&nbsp; ", format(Sys.Date(), "%B %Y"),
   "</div>")
 
@@ -774,11 +1060,11 @@ build_site_report_body <- function(site_id, include_header = TRUE) {
   sys_type    <- if (is.na(src_type)) "N/A" else src_type
   desc_text   <- if (is.na(site_meta$description[1]) ||
                      nchar(trimws(site_meta$description[1])) == 0) "" else site_meta$description[1]
-
+  
   national_df <- as.data.frame(combined_data)
   national    <- rpt_extract_ranks(national_df, site_id)
   site_scored <- national_df[national_df$wsd_source_id == site_id, ]
-
+  
   scope_subset <- function(mask) {
     sub <- combined_raw[mask, ]
     if (nrow(sub) >= 2) rpt_extract_ranks(calc_vulnerability_index(sub), site_id)
@@ -787,10 +1073,10 @@ build_site_report_body <- function(site_id, include_header = TRUE) {
   regional    <- scope_subset(combined_raw$region    == site_region)
   state_ranks <- scope_subset(combined_raw$state     == site_state)
   park_ranks  <- scope_subset(combined_raw$park_unit == site_park)
-
+  
   contrib_b64 <- build_contrib_chart_b64(site_scored, src_type)
   icicle      <- build_icicle_assets(site_scored, src_type)
-
+  
   make_rank_box <- function(label, ranks, color) {
     rank_val <- if (is.na(ranks$vuln_rank)) "N/A" else paste0(ranks$vuln_rank, "%")
     badge <- if (isTRUE(ranks$priority))
@@ -809,7 +1095,7 @@ build_site_report_body <- function(site_id, include_header = TRUE) {
     make_rank_box(paste0("Within State (", site_state, ")"), state_ranks, "#457B9D"),
     make_rank_box(paste0("Within Region (", site_region, ")"), regional, "#1D3557"),
     make_rank_box("Nationally", national, "#386150"), "</div>")
-
+  
   make_rank_row <- function(label, ranks) {
     fmt <- function(v) if (is.na(v)) "--" else paste0(v, "%")
     paste0("<tr><td class='l' style='padding:6px 10px;font-weight:600;'>",
@@ -829,13 +1115,13 @@ build_site_report_body <- function(site_id, include_header = TRUE) {
     make_rank_row(paste0("Within Region (", site_region, ")"), regional),
     make_rank_row("Nationally", national),
     "</tbody></table>")
-
+  
   desc_html <- if (nchar(desc_text) > 0) {
     paste0("<div style='background:#f7fafc;border-left:3px solid #2a7f7f;padding:10px 14px;",
            "border-radius:4px;margin:10px 0;font-size:13px;color:#333;line-height:1.5;'>",
            "<strong>System Description:</strong> ", htmltools::htmlEscape(desc_text), "</div>")
   } else ""
-
+  
   header <- if (include_header) paste0(
     "<h1>Water Supply Vulnerability Report</h1>",
     "<p class='subtitle'>", htmltools::htmlEscape(site_meta$park_name[1]), "</p>",
@@ -843,9 +1129,9 @@ build_site_report_body <- function(site_id, include_header = TRUE) {
     " &nbsp;|&nbsp; ", site_id, " &nbsp;|&nbsp; Generated ",
     format(Sys.Date(), "%B %d, %Y"), "</p>",
     "<div class='accent-line'></div>") else paste0(
-    "<h2 style='border-bottom:3px solid #1D3557;'>", htmltools::htmlEscape(site_meta$park_name[1]),
-    " &mdash; ", site_id, "</h2>")
-
+      "<h2 style='border-bottom:3px solid #1D3557;'>", htmltools::htmlEscape(site_meta$park_name[1]),
+      " &mdash; ", site_id, "</h2>")
+  
   paste0(
     header,
     "<h2>Site Information</h2>",
@@ -901,10 +1187,14 @@ build_supply_comparison_chart_b64 <- function(scored_df, label_col = "wsd_source
     data.frame(label = d$label, metric = "Sensitivity",   value = d$sen)
   )
   long$metric <- factor(long$metric, levels = c("Vulnerability", "Exposure", "Sensitivity"))
-
+  
   p <- ggplot2::ggplot(long, ggplot2::aes(x = label, y = value, fill = metric)) +
     ggplot2::geom_col(position = ggplot2::position_dodge(width = 0.8), width = 0.75) +
-    ggplot2::scale_fill_manual(values = c("Vulnerability" = "#386150",
+    # Vulnerability uses RPT_VULN_COLOR so this chart matches the All Levels
+    # Contribution chart and the popup, where Vulnerability is already the
+    # red/orange root box. It was previously the same green family as Exposure,
+    # which read as "Exposure, twice".
+    ggplot2::scale_fill_manual(values = c("Vulnerability" = RPT_VULN_COLOR,
                                           "Exposure" = RPT_EXP_COLOR,
                                           "Sensitivity" = RPT_SEN_COLOR), name = NULL) +
     ggplot2::scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
@@ -934,16 +1224,28 @@ build_factor_heatmap_b64 <- function(scored_df, label_col = "wsd_source_id") {
     paste0(d$label, if (d$comp == "Exposure") " (E)" else " (S)")
   }, character(1))
   names(lbls) <- vapply(report_factor_defs, function(d) d$id, character(1))
-
-  m <- as.data.frame(scored_df)[, fac_ids, drop = FALSE]
+  
+  m   <- as.data.frame(scored_df)[, fac_ids, drop = FALSE]
+  src <- as.character(as.data.frame(scored_df)$source_type)
+  
   long <- do.call(rbind, lapply(fac_ids, function(fid) {
+    v <- suppressWarnings(as.numeric(m[[fid]]))
+    # calc_vulnerability_index ZEROES factors that do not apply to a source type
+    # (precip for anything that is not rainwater, runoff for rainwater, and
+    # runoff/precip/demand for ocean). A zero is a real value to the colour
+    # scale, so those cells rendered as pale yellow -- indistinguishable from a
+    # genuinely low score, and wrong: at MORA every Precip cell looked like a
+    # scored 0 rather than "not applicable". Re-apply the same N/A test the
+    # contribution charts use so those cells drop to the grey na.value instead.
+    na_mask <- vapply(src, function(st) na_flag_for_source(fid, st), logical(1))
+    v[na_mask] <- NA_real_
     data.frame(site = as.character(scored_df[[label_col]]),
                factor_lbl = lbls[[fid]],
-               value = suppressWarnings(as.numeric(m[[fid]])),
+               value = v,
                stringsAsFactors = FALSE)
   }))
   long$factor_lbl <- factor(long$factor_lbl, levels = rev(unname(lbls[fac_ids])))
-
+  
   p <- ggplot2::ggplot(long, ggplot2::aes(x = site, y = factor_lbl, fill = value)) +
     ggplot2::geom_tile(color = "white", linewidth = 0.4) +
     ggplot2::scale_fill_gradientn(
@@ -999,18 +1301,18 @@ build_park_report_html <- function(park_unit_code) {
   nat <- as.data.frame(combined_data)
   sub <- nat[!is.na(nat$park_unit) & nat$park_unit == park_unit_code, ]
   if (nrow(sub) == 0) return(wrap_report_html("Park Report", "<p>No water supplies found for this park unit.</p>"))
-
+  
   park_name <- sub$park_name[1]
   region    <- sub$region[1]
   states    <- paste(sort(unique(na.omit(sub$state))), collapse = ", ")
-
+  
   # Within-park scores: recalculated so ranks are relative to this park alone,
   # shown alongside the national ranks rather than replacing them.
   raw_sub <- combined_raw[!is.na(combined_raw$park_unit) & combined_raw$park_unit == park_unit_code, ]
   within  <- if (nrow(raw_sub) >= 2) {
     tryCatch(calc_vulnerability_index(raw_sub), error = function(e) NULL)
   } else NULL
-
+  
   n_priority <- sum(isTRUE(TRUE) & !is.na(sub$priority_group) & sub$priority_group)
   flag_counts <- c(
     Fire    = sum(!is.na(sub$flag_fire)    & sub$flag_fire),
@@ -1018,7 +1320,7 @@ build_park_report_html <- function(park_unit_code) {
     SLR     = sum(!is.na(sub$flag_slr)     & sub$flag_slr),
     Drought = sum(!is.na(sub$flag_drought) & sub$flag_drought)
   )
-
+  
   summary_cards <- paste0(
     "<div style='display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;'>",
     paste0("<div style='flex:1;min-width:130px;background:white;border-radius:8px;padding:14px 12px;",
@@ -1040,7 +1342,7 @@ build_park_report_html <- function(park_unit_code) {
            "<div style='font-size:28px;font-weight:800;color:#C05235;'>",
            sprintf("%.1f", max(sub$VULNERABILITY_rank, na.rm = TRUE)), "</div></div>"),
     "</div>")
-
+  
   flags_summary <- paste0(
     "<table class='cmp-table' style='max-width:480px;'><thead><tr>",
     "<th style='text-align:left;'>Hazard Flag</th><th>Supplies Flagged</th><th>% of Park</th>",
@@ -1050,17 +1352,39 @@ build_park_report_html <- function(park_unit_code) {
       sprintf("%.0f%%", 100 * flag_counts[[k]] / nrow(sub)), "</td></tr>"), character(1)),
       collapse = ""),
     "</tbody></table>")
-
+  
   cmp_b64 <- build_supply_comparison_chart_b64(sub, "wsd_source_id",
-               title = paste0("National percentile ranks, ", park_unit_code, " water supplies"))
+                                               title = paste0("National percentile ranks, ", park_unit_code, " water supplies"))
   heat_b64 <- build_factor_heatmap_b64(sub, "wsd_source_id")
-
+  
+  # Within-park map. Ranks come from the recalculated within-park scores where
+  # the park has enough supplies to rank, so the map answers the same question
+  # as the Within-Park Ranking table: which of MY systems is worst. Falls back to
+  # national ranks for single-supply parks, and says which it is drawing.
+  map_src <- if (!is.null(within)) {
+    m <- as.data.frame(within)
+    m$park_name <- sub$park_name[1]
+    m
+  } else sub
+  map_rank_basis <- if (!is.null(within)) "within-park" else "national"
+  park_map_b64 <- tryCatch(
+    build_vulnerability_map_b64(
+      map_src, rank_col = "VULNERABILITY_rank",
+      title = paste0(park_unit_code, " water supplies"),
+      subtitle = paste0("Coloured and sized by ", map_rank_basis,
+                        " vulnerability percentile rank"),
+      park_name = sub$park_name[1],
+      legend_name = paste0(if (map_rank_basis == "within-park") "Within-park" else "National",
+                           "\nvulnerability\npercentile"),
+      width = 7.5, height = 5.5),
+    error = function(e) NULL)
+  
   within_html <- if (!is.null(within)) {
     w <- as.data.frame(within)
     w <- w[order(-w$VULNERABILITY_rank), c("wsd_source_id", "VULNERABILITY_rank",
                                            "EXPOSURE_rank", "SENSITIVITY_rank")]
     paste0(
-      "<h2>Within-Park Ranking</h2>",
+      "<h2>Within-Park Ranking <em>(recalculated within this park)</em></h2>",
       "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Scores recalculated using only this park's supplies as the comparison group. ",
       "These ranks answer \"which of my systems is most vulnerable relative to my other systems\" and are ",
       "not comparable to the national ranks above.</p>",
@@ -1073,31 +1397,75 @@ build_park_report_html <- function(park_unit_code) {
         sprintf("%.1f", w$SENSITIVITY_rank[i]), "</td></tr>"), character(1)), collapse = ""),
       "</tbody></table>")
   } else {
-    "<h2>Within-Park Ranking</h2><p style='font-size:12px;color:#696969;'>This park has a single water supply, so within-park ranking is not meaningful.</p>"
+    "<h2>Within-Park Ranking</h2><p style='font-size:12px;color:#696969;'>This park has a single water supply, so within-park ranking is not meaningful. Every score in this report is therefore national.</p>"
   }
-
+  
   body <- paste0(
     "<h1>Park Water Supply Vulnerability Report</h1>",
     "<p class='subtitle'>", htmltools::htmlEscape(park_name), " (", htmltools::htmlEscape(park_unit_code), ")</p>",
     "<p class='meta'>", htmltools::htmlEscape(region), " &nbsp;|&nbsp; ", htmltools::htmlEscape(states),
     " &nbsp;|&nbsp; Generated ", format(Sys.Date(), "%B %d, %Y"), "</p>",
     "<div class='accent-line'></div>",
-    "<h2>Park Summary</h2>", summary_cards,
-    "<h2>Hazard Flag Summary</h2>",
+    # This report deliberately mixes two comparison groups: national scoring for
+    # everything that should be comparable outside the park, and recalculated
+    # within-park scoring for the two sections that answer "which of my systems
+    # is worst". Readers hit both within a few pages, so the basis for each
+    # section is stated up front rather than left to the individual captions.
+    "<h2>How to Read This Report</h2>",
+    "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Scores in this assessment are <b>relative</b>, so every number ",
+    "depends on the group it was compared against. This report uses two different groups, and each section below says which ",
+    "one it is using.</p>",
+    "<table class='cmp-table' style='max-width:640px;'><thead><tr>",
+    "<th style='text-align:left;'>Section</th><th style='text-align:left;'>Comparison group</th>",
+    "<th style='text-align:left;'>Answers</th></tr></thead><tbody>",
+    "<tr><td class='l'>Park Summary</td><td class='l'>National</td>",
+    "<td class='l'>How does this park sit nationally?</td></tr>",
+    "<tr><td class='l'>Hazard Flag Summary</td><td class='l'>National</td>",
+    "<td class='l'>Which hazards trigger here, on national thresholds?</td></tr>",
+    "<tr><td class='l'>All Water Supplies</td><td class='l'>National</td>",
+    "<td class='l'>How do these supplies rank against all CONUS NPS supplies?</td></tr>",
+    "<tr><td class='l'>Factor Score Comparison</td><td class='l'>National</td>",
+    "<td class='l'>Which factors are high here, on a national 0-1 scale?</td></tr>",
+    "<tr style='background:#f7fafc;'><td class='l'>Water Supply Map</td><td class='l'><b>",
+    if (!is.null(within)) "Within-park (recalculated)" else "National",
+    "</b></td><td class='l'>",
+    if (!is.null(within)) "Which of my systems is most vulnerable relative to my others?"
+    else "Single-supply park, so national ranks are shown.", "</td></tr>",
+    "<tr style='background:#f7fafc;'><td class='l'>Within-Park Ranking</td><td class='l'><b>Within-park (recalculated)</b></td>",
+    "<td class='l'>Which of my systems should I look at first?</td></tr>",
+    "</tbody></table>",
+    "<p style='font-size:12px;color:#696969;'>The two shaded rows are the only sections rescored using this park alone. ",
+    "A supply can therefore be near the top within the park while sitting mid-range nationally, or the reverse. Neither ",
+    "number is wrong; they answer different questions, so quote the one that matches the decision you are making.</p>",
+    "<h2>Park Summary <em>(national scoring)</em></h2>", summary_cards,
+    "<h2>Hazard Flag Summary <em>(national scoring)</em></h2>",
     "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Counts of supplies triggering each hazard flag (factor score >= 0.75), evaluated nationally.</p>",
     flags_summary,
+    if (!is.null(park_map_b64)) paste0(
+      "<h2>Water Supply Map <em>(", map_rank_basis, " scoring)</em></h2>",
+      "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Each water supply in the park, coloured and sized by its <b>",
+      map_rank_basis, "</b> vulnerability percentile rank. Larger, darker circles are more vulnerable. ",
+      "Grey circles have no score. The shaded polygon is the park boundary where one could be matched.</p>",
+      "<img src='data:image/png;base64,", park_map_b64,
+      "' style='width:100%;max-width:780px;display:block;margin:12px auto;' />") else "",
     "<h2>All Water Supplies (National Ranks)</h2>",
     "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Percentile ranks against all CONUS NPS water supplies. Higher = more vulnerable.</p>",
     build_supply_table_html(sub, show_park = FALSE),
     "<img src='data:image/png;base64,", cmp_b64,
     "' style='width:100%;max-width:800px;display:block;margin:16px auto;' />",
     if (!is.null(heat_b64)) paste0(
-      "<h2>Factor Score Comparison</h2>",
-      "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Normalized factor scores (0-1) for every supply in the park. Grey cells are not applicable to the supply's source type or have no data.</p>",
+      "<h2>Factor Score Comparison <em>(national scoring)</em></h2>",
+      "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Normalized factor scores (0-1) for every supply in the park. ",
+      "<b>These are national scores.</b> Each factor was min-max normalized across all CONUS NPS water supplies, so a value of ",
+      "1.0 means that supply is at the national maximum for that factor, and a park whose cells are uniformly pale is genuinely ",
+      "low-risk on that factor rather than merely lowest among its neighbours. They are <i>not</i> renormalized within the park: ",
+      "doing so would force one supply to 0.0 and another to 1.0 on every single factor, which for a park with a handful of ",
+      "supplies manufactures contrast that is not in the data. Grey cells are not applicable to the supply's source type ",
+      "(for example precipitation factors on a groundwater system) or have no data.</p>",
       "<img src='data:image/png;base64,", heat_b64,
       "' style='width:100%;max-width:850px;display:block;margin:12px auto;' />") else "",
     within_html)
-
+  
   wrap_report_html(paste0("Park Report - ", park_name), body)
 }
 
@@ -1106,7 +1474,7 @@ build_multipark_report_html <- function(park_unit_codes) {
   nat <- as.data.frame(combined_data)
   sub <- nat[!is.na(nat$park_unit) & nat$park_unit %in% park_unit_codes, ]
   if (nrow(sub) == 0) return(wrap_report_html("Multi-Park Report", "<p>No water supplies found for the selected parks.</p>"))
-
+  
   park_rows <- lapply(split(sub, sub$park_unit), function(d) {
     data.frame(
       park_unit = d$park_unit[1],
@@ -1119,14 +1487,14 @@ build_multipark_report_html <- function(park_unit_codes) {
       med_sen   = median(d$SENSITIVITY_rank, na.rm = TRUE),
       n_prio    = sum(!is.na(d$priority_group) & d$priority_group),
       n_flag    = sum((!is.na(d$flag_fire) & d$flag_fire) |
-                      (!is.na(d$flag_flood) & d$flag_flood) |
-                      (!is.na(d$flag_slr) & d$flag_slr) |
-                      (!is.na(d$flag_drought) & d$flag_drought)),
+                        (!is.na(d$flag_flood) & d$flag_flood) |
+                        (!is.na(d$flag_slr) & d$flag_slr) |
+                        (!is.na(d$flag_drought) & d$flag_drought)),
       stringsAsFactors = FALSE)
   })
   park_df <- do.call(rbind, park_rows)
   park_df <- park_df[order(-park_df$med_vuln), ]
-
+  
   park_table <- paste0(
     "<table class='cmp-table'><thead><tr>",
     "<th style='text-align:left;'>Park Unit</th><th style='text-align:left;'>Park Name</th>",
@@ -1146,7 +1514,7 @@ build_multipark_report_html <- function(park_unit_codes) {
              "<td>", r$n_prio, "</td><td>", r$n_flag, "</td></tr>")
     }, character(1)), collapse = ""),
     "</tbody></table>")
-
+  
   # Distribution of supply-level vulnerability rank within each selected park
   bx <- data.frame(park = factor(sub$park_unit, levels = rev(park_df$park_unit)),
                    value = as.numeric(sub$VULNERABILITY_rank))
@@ -1171,10 +1539,14 @@ build_multipark_report_html <- function(park_unit_codes) {
   ggplot2::ggsave(f, p_box, width = 8, height = max(3.5, min(14, 0.55 * nrow(park_df) + 2)),
                   dpi = 150, bg = "white", limitsize = FALSE)
   box_b64 <- base64enc::base64encode(f)
-
+  
+  facet_maps_html <- tryCatch(
+    build_park_facet_maps_html(sub, park_df$park_unit),
+    error = function(e) NULL)
+  
   top_n <- min(25, nrow(sub))
   top_sub <- sub[order(-sub$VULNERABILITY_rank), ][seq_len(top_n), ]
-
+  
   body <- paste0(
     "<h1>Multi-Park Water Supply Comparison</h1>",
     "<p class='subtitle'>", length(unique(sub$park_unit)), " park units &nbsp;|&nbsp; ",
@@ -1182,16 +1554,29 @@ build_multipark_report_html <- function(park_unit_codes) {
     "<p class='meta'>", htmltools::htmlEscape(paste(sort(unique(sub$park_unit)), collapse = ", ")),
     " &nbsp;|&nbsp; Generated ", format(Sys.Date(), "%B %d, %Y"), "</p>",
     "<div class='accent-line'></div>",
-    "<h2>Park-Level Summary</h2>",
+    "<h2>How to Read This Report</h2>",
+    "<p style='font-size:12px;color:#696969;margin-top:-4px;'><b>Every score in this report is national.</b> Factor scores, ",
+    "component scores and percentile ranks were all normalized across all CONUS NPS water supplies, which is what makes the ",
+    "parks below directly comparable to one another. Nothing here is renormalized within a park or within the selection. If ",
+    "you need to know which supply is worst <i>inside</i> one park, build a whole-park report for that park instead: it adds ",
+    "a recalculated within-park ranking alongside the national one.</p>",
+    "<h2>Park-Level Summary <em>(national scoring)</em></h2>",
     "<p style='font-size:12px;color:#696969;margin-top:-4px;'>All ranks are national percentiles across all CONUS NPS water supplies, so parks are directly comparable to one another. Sorted by median vulnerability.</p>",
     park_table,
     "<img src='data:image/png;base64,", box_b64,
     "' style='width:100%;max-width:800px;display:block;margin:16px auto;' />",
-    "<h2>Most Vulnerable Supplies Across Selection</h2>",
+    if (!is.null(facet_maps_html)) paste0(
+      "<h2>Water Supply Maps by Park <em>(national scoring)</em></h2>",
+      "<p style='font-size:12px;color:#696969;margin-top:-4px;'>One panel per park unit, each zoomed to that park's own extent. ",
+      "All panels share a single colour scale fixed to the <b>national</b> vulnerability percentile (0-100), so a dark circle ",
+      "means the same thing in every panel and the panels can be read against one another. Note that the panels are not ",
+      "at a common map scale &mdash; each is zoomed to fit its park, so circle spacing is not comparable between panels.</p>",
+      facet_maps_html) else "",
+    "<h2>Most Vulnerable Supplies Across Selection <em>(national scoring)</em></h2>",
     "<p style='font-size:12px;color:#696969;margin-top:-4px;'>Top ", top_n,
     " individual water supplies by national vulnerability rank.</p>",
     build_supply_table_html(top_sub, show_park = TRUE))
-
+  
   wrap_report_html("Multi-Park Comparison Report", body)
 }
 
@@ -1202,7 +1587,7 @@ build_batch_report_html <- function(site_ids, scope_label = "") {
     paste0(if (i > 1) "<div class='page-break'></div>" else "",
            build_site_report_body(site_ids[i], include_header = FALSE))
   }, character(1))
-
+  
   toc <- paste0(
     "<h2>Contents</h2><ol style='font-size:13px;color:#333;'>",
     paste0(vapply(site_ids, function(sid) {
@@ -1211,7 +1596,7 @@ build_batch_report_html <- function(site_ids, scope_label = "") {
              htmltools::htmlEscape(as.character(sid)), "</li>")
     }, character(1)), collapse = ""),
     "</ol>")
-
+  
   body <- paste0(
     "<h1>Batch Water Supply Vulnerability Report</h1>",
     "<p class='subtitle'>", n, " water supplies</p>",
@@ -1219,7 +1604,7 @@ build_batch_report_html <- function(site_ids, scope_label = "") {
     " &nbsp;|&nbsp; Generated ", format(Sys.Date(), "%B %d, %Y"), "</p>",
     "<div class='accent-line'></div>", toc,
     paste(sections, collapse = ""))
-
+  
   wrap_report_html("Batch Vulnerability Report", body)
 }
 
@@ -1290,8 +1675,21 @@ ui <- navbarPage(
       }
       .form-group label { font-weight:600; color:#1D3557; margin-bottom:6px; }
       .radio label, .checkbox label { font-weight:normal; color:#495057; }
-      .btn-primary { background-color:#1D3557; border-color:#1D3557; }
-      .btn-primary:hover { background-color:#122440; border-color:#122440; }
+      /* actionButton() always emits 'btn btn-default action-button' and then
+         APPENDS whatever class you pass, so a btn-primary button carries both
+         classes. .btn-default's color:#1D3557 is declared later and has equal
+         specificity, so it won every time -- navy text on a navy fill, i.e.
+         invisible until :hover repainted it. Raising the primary rules to
+         .btn.btn-primary (specificity 0,2,0) settles it without needing the
+         call sites to stop passing btn-primary. */
+      .btn.btn-primary,
+      .btn.btn-primary:focus,
+      .btn.btn-primary:active {
+        background-color:#1D3557; border-color:#1D3557; color:#ffffff;
+      }
+      .btn.btn-primary:hover {
+        background-color:#122440; border-color:#122440; color:#ffffff;
+      }
       .btn-default { border-color:#1D3557; color:#1D3557; }
       
       #clear_filters {
@@ -1366,9 +1764,18 @@ ui <- navbarPage(
       .filter-divider {
         width: 1px; background: #dce8ef; align-self: stretch; margin: 0 6px;
       }
+      /* The badge sits in a narrow 2-column panel, so its text WILL wrap.
+         As a plain inline span the background broke into two ragged runs with
+         rounded corners only at the very start and end -- the overflow artifact.
+         inline-block makes it one block box that wraps internally, so the pill
+         stays a single rounded rectangle at any width. box-decoration-break is
+         belt-and-braces for anywhere it still renders inline. */
       .filter-badge {
-        background:#1D3557; color:white; border-radius:12px;
-        padding:2px 10px; font-size:0.8rem; margin-left:8px;
+        display:inline-block; max-width:100%; box-sizing:border-box;
+        background:#1D3557; color:white; border-radius:10px;
+        padding:4px 10px; font-size:1.1rem; line-height:1.35;
+        margin:6px 0 0 0; white-space:normal; overflow-wrap:break-word;
+        -webkit-box-decoration-break:clone; box-decoration-break:clone;
       }
       #view_mode { display: none !important; }
       .selectize-dropdown { z-index:1100 !important; }
@@ -1615,23 +2022,35 @@ ui <- navbarPage(
                                     tags$hr(style = "border-color:#dce8ef; margin:8px 0;"),
                                     p(style = "font-size:1.2rem; color:#555; margin-bottom:6px;",
                                       HTML("<b>Percentile ranks</b> and <b>High Priority</b> flags (shown in popups and the data table)
-            indicate where a water supply falls relative to others in the <b>current view</b> &mdash;
-            a rank of <b>90</b> means the supply scores higher than 90% of the comparison group.
-            Both are recalculated whenever a region, state, or park filter is applied, so
-            a supply flagged as High Priority within a filtered view may not hold that designation nationally.")),
+            indicate where a water supply falls relative to others in its <b>comparison group</b> &mdash;
+            a rank of <b>90</b> means the supply scores higher than 90% of that group.
+            <b>Only the Region and State filters change the comparison group.</b> Applying either one
+            renormalizes and reranks every supply in the selection, so a supply flagged as High Priority
+            within a state may not hold that designation nationally.")),
+                                    p(style = "font-size:1.2rem; color:#555; margin-bottom:6px;",
+                                      HTML("The <b>Park Unit</b>, <b>Source Type</b>, <b>Hazard Flag</b> and
+            <b>Top Priority</b> filters work differently: they subset what is drawn on the map and listed
+            in the table, but they do <b>not</b> trigger a recalculation. Filtering to a single park shows you
+            that park&rsquo;s supplies carrying their <i>national</i> (or Region/State) ranks &mdash; not
+            ranks against the other supplies in that park. The <b>Scores:</b> badge in the Current View
+            panel always names the group the numbers on screen were actually calculated against.
+            If you want true within-park rankings, build a <b>whole-park report</b> from the Advanced
+            Reports panel below the map; it reports both, side by side and labelled.")),
                                     div(style = "background:#fff8e6; border-left:3px solid #8B6914; border-radius:4px; padding:8px 12px; margin-top:6px;",
                                         p(style = "font-size:1.4rem; color:#5a4a1a; margin:0;",
                                           HTML("<b><span aria-hidden='true'>&#x26A0;&#xFE0F;</span> Scores are relative, not absolute.</b>
                 A score only has meaning within the group it is compared against.
                 The same water supply may rank differently depending on whether it is evaluated
-                across CONUS, a region, a state, or a subset of parks. Use filters intentionally to ensure comparisons are meaningful.")))
+                across CONUS, a region, or a state. Set Region and State intentionally to ensure
+                comparisons are meaningful, and read the <b>Scores:</b> badge before quoting a rank.")))
                                 ),
                                 h3(class = "info-section-title", icon("exclamation-triangle"), " Priority & Hazard Flags"),
                                 p(HTML("Water supplies in the <strong>top 25% vulnerability score of the current comparison group</strong>
           are flagged as
           <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
-          This threshold is recalculated relative to the active filter (CONUS, region, or state subset),
-          so priority designations reflect the selected comparison group, not a fixed national threshold.
+          This threshold is recalculated relative to the Region/State comparison group
+          (CONUS, region, or state subset), so priority designations reflect that group rather than a
+          fixed national threshold. Filtering by park, source type or hazard flag does not move the threshold.
           Popups also display hazard-specific flags:
           <span class='badge-demo' style='background:#C05235;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>
           <span class='badge-demo' style='background:#457B9D;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>
@@ -1718,11 +2137,13 @@ ui <- navbarPage(
                         div(role = "group", `aria-labelledby` = "geo-filter-label",
                             div(id = "geo-filter-label", class = "filter-section-label", HTML("<span aria-hidden='true'>&#x1F4CD;</span> Geographic Filter"),
                                 tags$span(style = "color:#aaa; font-weight:400; margin-left:6px; font-size:1.2rem;",
-                                          "(filtering recalculates scores)")),
+                                          "(Region and State recalculate scores; Park Unit does not)")),
                             fluidRow(
                               column(4,
                                      selectizeInput("filter_region",
-                                                    label = tags$span("Region", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                                    label = tags$span("Region",
+                                                                      tags$span(style = "color:#386150; font-weight:400; font-size:1rem;", " \u21bb rescores"),
+                                                                      style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                                     choices = c("All Regions" = "", all_regions),
                                                     selected = NULL, multiple = TRUE,
                                                     options = list(placeholder = "Search regions...",
@@ -1730,7 +2151,9 @@ ui <- navbarPage(
                               ),
                               column(4,
                                      selectizeInput("filter_state",
-                                                    label = tags$span("State", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                                    label = tags$span("State",
+                                                                      tags$span(style = "color:#386150; font-weight:400; font-size:1rem;", " \u21bb rescores"),
+                                                                      style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                                     choices = c("All States" = "", all_states),
                                                     selected = NULL, multiple = TRUE,
                                                     options = list(placeholder = "Search states...",
@@ -1738,7 +2161,9 @@ ui <- navbarPage(
                               ),
                               column(4,
                                      selectizeInput("filter_park",
-                                                    label = tags$span("Park Unit", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
+                                                    label = tags$span("Park Unit",
+                                                                      tags$span(style = "color:#888; font-weight:400; font-size:1rem;", " view only"),
+                                                                      style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                                     choices = c("All Parks" = "", all_parks),
                                                     selected = NULL, multiple = TRUE,
                                                     options = list(placeholder = "Search parks...",
@@ -2104,7 +2529,7 @@ server <- function(input, output, session) {
     ind_status <- if (!is.null(details) && !is.null(details$status) && !is.na(details$status)) {
       details$status
     } else if (!is.null(cfg$status)) cfg$status else "Implemented"
-
+    
     body_html <- if (!is.null(details)) {
       paste0(
         "<table style='width:100%; border-collapse:collapse; font-size:13px;'>",
@@ -2248,7 +2673,7 @@ server <- function(input, output, session) {
     df <- geo_recalculated_data()
     if (length(input$filter_park) > 0) df <- df %>% filter(park_unit %in% input$filter_park)
     if (isTRUE(input$filter_priority)) df <- df %>% filter(priority_group == TRUE)
-
+    
     ## Hazard flag filter ----
     # Flag columns are logical with possible NAs; NA is treated as "not flagged"
     # so a site with a missing factor score is never silently promoted into a
@@ -2371,11 +2796,21 @@ server <- function(input, output, session) {
   }, ignoreInit = TRUE)
   
   ## Filter Info Badge ----
+  # Two independent facts, previously conflated into one branch:
+  #   (a) HOW MANY supplies are on the map right now, and
+  #   (b) WHICH group the scores on those supplies were calculated against.
+  # The old version keyed the count off filtered_data() and only showed a count
+  # at all when a Region/State/Park filter was set. That meant the Source Type,
+  # Hazard Flag, Top Priority and indicator value-range filters could all cut the
+  # map down to a handful of points while this panel still read "Showing all
+  # 1409 water supplies". The count now comes from map_indicator_filtered_data(),
+  # which is exactly what addCircleMarkers() is handed, so it cannot drift out of
+  # step with the map again no matter which filter is added later.
   output$filter_info <- renderUI({
-    n   <- nrow(filtered_data())
-    tot <- nrow(combined_data)
-    has_geo_filter  <- length(input$filter_region) > 0 || length(input$filter_state) > 0
-    has_park_filter <- length(input$filter_park) > 0
+    shown <- nrow(map_indicator_filtered_data())
+    tot   <- nrow(combined_data)
+    
+    has_geo_filter <- length(input$filter_region) > 0 || length(input$filter_state) > 0
     
     region_label <- paste(input$filter_region, collapse = ", ")
     state_label  <- paste(input$filter_state,  collapse = ", ")
@@ -2390,26 +2825,54 @@ server <- function(input, output, session) {
       "National"
     }
     
-    if (!has_geo_filter && !has_park_filter) {
-      tagList(
-        p(style = "color:#666; font-size:1.5rem; margin-top:8px;",
-          paste0("Showing all ", tot, " water supplies")),
-        tags$span(class = "filter-badge", style = "font-size:1.2rem; background:#386150;",
-                  "\U0001f30e Scores: National")
-      )
+    # Named so the tooltip can tell the user WHY the count dropped, which the
+    # bare number never did.
+    active_filters <- c(
+      if (length(input$filter_region) > 0)      "Region"      else NULL,
+      if (length(input$filter_state) > 0)       "State"       else NULL,
+      if (length(input$filter_park) > 0)        "Park Unit"   else NULL,
+      if (length(input$filter_source_type) > 0) "Source Type" else NULL,
+      if (length(input$filter_flags) > 0)       "Hazard Flag" else NULL,
+      if (isTRUE(input$filter_priority))        "Top Priority" else NULL
+    )
+    # The value-range slider lives on the map rather than the filter panel, so it
+    # is detected by its effect rather than by reading an input.
+    range_active <- isTRUE(input$view_mode == "indicator") &&
+      shown < nrow(as.data.frame(filtered_data_display()))
+    if (range_active) active_filters <- c(active_filters, "Indicator Value Range")
+    
+    count_line <- if (shown == tot) {
+      p(style = "color:#666; font-size:1.25rem; margin-top:8px; margin-bottom:2px;",
+        paste0("Showing all ", tot, " water supplies"))
     } else {
-      tagList(
-        p(style = "color:#1D3557; font-weight:600; font-size:1.2rem; margin-top:8px;",
-          paste0("Showing ", n, " of ", tot, " water supplies")),
-        tags$span(class = "filter-badge",
-                  style = paste0("font-size:1.5rem; background:",
-                                 if (has_geo_filter) "#386150;" else "#457B9D;"),
-                  if (has_geo_filter)
-                    paste0("\U0001f4ca Scores: ", context_label)
-                  else
-                    "\U0001f4ca Scores: National (park filter only)")
-      )
+      p(style = "color:#1D3557; font-weight:600; font-size:1.25rem; margin-top:8px; margin-bottom:2px;",
+        title = if (length(active_filters) > 0)
+          paste0("Active filters: ", paste(active_filters, collapse = ", ")) else NULL,
+        paste0("Showing ", shown, " of ", tot, " water supplies"))
     }
+    
+    filter_line <- if (length(active_filters) > 0) {
+      p(style = "color:#888; font-size:1rem; line-height:1.3; margin:0 0 2px 0;",
+        paste0("Filtered by: ", paste(active_filters, collapse = ", ")))
+    } else NULL
+    
+    # Scores badge tracks the NORMALIZATION group, which only Region and State
+    # change -- deliberately independent of the count above.
+    score_badge <- if (has_geo_filter) {
+      tags$span(class = "filter-badge", style = "background:#386150;",
+                paste0("\U0001f4ca Scores: ", context_label))
+    } else if (length(active_filters) > 0) {
+      tags$span(class = "filter-badge", style = "background:#457B9D;",
+                title = paste0("The filters applied (", paste(active_filters, collapse = ", "),
+                               ") narrow the view but do not rescore. ",
+                               "Only Region and State change the comparison group."),
+                "\U0001f4ca Scores: National \u00b7 view filtered")
+    } else {
+      tags$span(class = "filter-badge", style = "background:#386150;",
+                "\U0001f30e Scores: National")
+    }
+    
+    tagList(count_line, filter_line, score_badge)
   })
   
   ## Active Column ----
@@ -2951,7 +3414,7 @@ server <- function(input, output, session) {
     factor_defs <- report_factor_defs
     na_flag_for <- function(id) na_flag_for_source(id, src_type)
     safe_div    <- rpt_safe_div
-
+    
     # Site's normalized value for an indicator, NA-safe.
     site_norm <- function(norm_col) {
       v <- site_row[[norm_col]]
@@ -3130,12 +3593,23 @@ server <- function(input, output, session) {
     # values are plotted rather than raw values so that indicators measured in
     # days, metres, percent and degrees C share one axis.
     # ===================================================================
-    comp_group_df <- as.data.frame(filtered_data())
-
+    # The comparison group here is geo_recalculated_data(), NOT filtered_data().
+    # That is the set min-max normalization was actually run over: scores are
+    # only recalculated on Region/State changes, so the Park, Priority, Source
+    # Type and Hazard Flag filters narrow what is DISPLAYED without changing a
+    # single normalized value. Drawing the boxes from filtered_data() therefore
+    # showed a distribution the numbers were never normalized against, and
+    # reported an "n =" that shrank with those filters while still labelling the
+    # scope "National" -- e.g. n = 100 under a priority filter, when all 1,410
+    # supplies defined the 0-1 range every diamond is plotted on.
+    norm_group_df  <- as.data.frame(geo_recalculated_data())
+    n_norm_group   <- nrow(norm_group_df)
+    n_display_view <- nrow(as.data.frame(filtered_data()))
+    
     dist_parts <- list(); site_parts <- list(); missing_labels <- character(0)
     for (e in scored_indicator_index) {
-      if (!e$col %in% names(comp_group_df)) next
-      v <- suppressWarnings(as.numeric(comp_group_df[[e$col]]))
+      if (!e$col %in% names(norm_group_df)) next
+      v <- suppressWarnings(as.numeric(norm_group_df[[e$col]]))
       v <- v[is.finite(v)]
       if (length(v) == 0) next
       lbl <- paste0(e$indicator, if (identical(e$status, "Provisional")) " *" else "")
@@ -3150,18 +3624,18 @@ server <- function(input, output, session) {
         missing_labels <- c(missing_labels, e$indicator)
       }
     }
-
+    
     p_dist <- NULL
     dist_height <- 520
     if (length(dist_parts) > 0) {
       dist_df <- do.call(rbind, dist_parts)
       site_df <- if (length(site_parts) > 0) do.call(rbind, site_parts) else NULL
-
+      
       # Exposure block on top, Sensitivity below, config order within each.
       lvl <- unique(dist_df$label[order(match(dist_df$component, c("Exposure", "Sensitivity")))])
       lvl <- rev(lvl)
       dist_height <- max(420, 30 * length(lvl) + 150)
-
+      
       p_dist <- plot_ly() %>%
         add_trace(
           data = dist_df, x = ~value, y = ~label, type = "box", orientation = "h",
@@ -3187,7 +3661,8 @@ server <- function(input, output, session) {
           text = paste0(site_title,
                         "<br><span style='font-size:11px;color:#696969;font-weight:400;'>",
                         "Normalized indicator values (0 = least vulnerable, 1 = most) \u00b7 ",
-                        scope_label, " \u00b7 n = ", nrow(comp_group_df), " supplies</span>"),
+                        scope_label, " \u00b7 normalized over n = ", n_norm_group,
+                        " supplies</span>"),
           font = list(size = 14, color = "#1D3557"), x = 0, xanchor = "left"),
         xaxis = list(title = "Normalized value (0-1)", range = c(-0.03, 1.03),
                      tickfont = list(size = 10), gridcolor = "#eee", zeroline = FALSE),
@@ -3198,19 +3673,35 @@ server <- function(input, output, session) {
         plot_bgcolor = "white", paper_bgcolor = "white", showlegend = TRUE
       )
     }
-
+    
+    # Named the same way in the caption as in the subtitle, and explicit about
+    # the fact that a narrowed map view does not narrow this chart.
+    narrowing_filters <- c(
+      if (length(input$filter_park) > 0) "park" else NULL,
+      if (isTRUE(input$filter_priority)) "priority" else NULL,
+      if (length(input$filter_source_type) > 0) "source type" else NULL,
+      if (length(input$filter_flags) > 0) "hazard flag" else NULL
+    )
     dist_caption <- paste0(
-      "Each box shows the spread of a normalized indicator across the current comparison group (<b>",
-      scope_label, "</b>); the red diamond is this water supply. Values are min-max normalized ",
-      "<i>within that comparison group</i> and direction-corrected, so 1 is always the most ",
-      "vulnerable end regardless of whether the raw indicator increases or decreases with risk. ",
-      "Indicators marked <b>*</b> are Provisional. Model-agreement columns are not shown: they are ",
-      "confidence weights applied to their parent indicator, not independent axes of the score.",
+      "Each box shows the spread of a normalized indicator across the <b>normalization group</b> ",
+      "(<b>", scope_label, "</b>, n = ", n_norm_group, " supplies); the red diamond is this water ",
+      "supply, and the percentile in each tooltip is its position within that same group. Values are ",
+      "min-max normalized <i>within the normalization group</i> and direction-corrected, so 1 is ",
+      "always the most vulnerable end regardless of whether the raw indicator increases or decreases ",
+      "with risk. Indicators marked <b>*</b> are Provisional. Model-agreement columns are not shown: ",
+      "they are confidence weights applied to their parent indicator, not independent axes of the score.",
+      if (length(narrowing_filters) > 0) paste0(
+        "<br><b>Note:</b> your ", paste(narrowing_filters, collapse = " and "),
+        " filter narrows the map to ", n_display_view, " of these ", n_norm_group,
+        " supplies, but does not trigger renormalization. The boxes and percentiles above are ",
+        "therefore still drawn over all ", n_norm_group, " supplies, which is the set these ",
+        "normalized values were actually calculated from. Only a Region or State filter changes ",
+        "the normalization group.") else "",
       if (length(missing_labels) > 0)
         paste0("<br><b>No data for this supply on:</b> ",
                htmltools::htmlEscape(paste(missing_labels, collapse = ", ")), ".")
       else "")
-
+    
     # ===================================================================
     # Modal with all tabs
     # ===================================================================
@@ -3265,7 +3756,7 @@ server <- function(input, output, session) {
   # are slow enough that silently handing back a file the user then discards is a
   # bad trade.
   staged_report <- reactiveVal(NULL)
-
+  
   show_report_preview <- function(staged, title, subtitle = NULL) {
     staged_report(staged)
     showModal(modalDialog(
@@ -3291,7 +3782,7 @@ server <- function(input, output, session) {
       footer = modalButton("Close")
     ))
   }
-
+  
   output$download_report <- downloadHandler(
     filename = function() {
       st <- staged_report()
@@ -3303,12 +3794,12 @@ server <- function(input, output, session) {
       file.copy(st$path, file, overwrite = TRUE)
     }
   )
-
+  
   ## Single-Site Report (from map popup) ----
   observeEvent(input$generate_report_btn, {
     site_id <- input$generate_report_btn
     req(site_id %in% combined_raw$wsd_source_id)
-
+    
     notif_id <- showNotification("Generating report...", duration = NULL,
                                  closeButton = FALSE, type = "message")
     tryCatch({
@@ -3327,7 +3818,7 @@ server <- function(input, output, session) {
                        type = "error", duration = 8)
     })
   })
-
+  
   ## Advanced Report Controls ----
   # Park choices are drawn from the full dataset, not the filtered view, because
   # reports are deliberately national in scope; the "use the parks currently on
@@ -3341,7 +3832,7 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "report_parks_multi",
                          choices = park_choices, selected = character(0), server = TRUE)
   })
-
+  
   observeEvent(input$report_use_filtered, {
     parks_now <- sort(unique(na.omit(as.data.frame(filtered_data_display())$park_unit)))
     if (length(parks_now) == 0) {
@@ -3352,7 +3843,7 @@ server <- function(input, output, session) {
     showNotification(paste0("Selected ", length(parks_now), " park unit(s) from the current map view."),
                      type = "message", duration = 4)
   })
-
+  
   output$report_scope_note <- renderUI({
     mode <- input$report_mode
     if (is.null(mode)) return(NULL)
@@ -3374,13 +3865,13 @@ server <- function(input, output, session) {
           paste0(length(sel), " park unit(s), ", n, " water supplies.", warn))
     }
   })
-
+  
   ## Build Advanced Report ----
   observeEvent(input$build_advanced_report, {
     mode <- input$report_mode
     req(mode)
     nat <- as.data.frame(combined_data)
-
+    
     if (identical(mode, "park")) {
       req(input$report_park)
       parks <- input$report_park
@@ -3392,13 +3883,13 @@ server <- function(input, output, session) {
         return(invisible(NULL))
       }
     }
-
+    
     site_ids <- nat$wsd_source_id[!is.na(nat$park_unit) & nat$park_unit %in% parks]
     if (length(site_ids) == 0) {
       showNotification("No water supplies found for that selection.", type = "error", duration = 6)
       return(invisible(NULL))
     }
-
+    
     # Hard ceiling on batch size. Each site in a batch triggers three
     # recalculations of the full index (park, state, region), so an unbounded
     # batch is an easy way to hang the session rather than a useful feature.
@@ -3411,12 +3902,12 @@ server <- function(input, output, session) {
         type = "error", duration = 10)
       return(invisible(NULL))
     }
-
+    
     notif_id <- showNotification(
       paste0("Building ", switch(mode, park = "park", multipark = "multi-park", batch = "batch"),
              " report..."),
       duration = NULL, closeButton = FALSE, type = "message")
-
+    
     tryCatch({
       if (identical(mode, "park")) {
         pname <- nat$park_name[!is.na(nat$park_unit) & nat$park_unit == parks][1]
@@ -3424,28 +3915,28 @@ server <- function(input, output, session) {
         staged <- stage_report(html, paste0("park_report_", parks))
         removeNotification(notif_id)
         show_report_preview(staged,
-          title = paste0("Report Preview: ", pname, " (", parks, ")"),
-          subtitle = paste0(length(site_ids),
-                            " water supplies, ranked nationally and within the park."))
-
+                            title = paste0("Report Preview: ", pname, " (", parks, ")"),
+                            subtitle = paste0(length(site_ids),
+                                              " water supplies, ranked nationally and within the park."))
+        
       } else if (identical(mode, "multipark")) {
         html   <- build_multipark_report_html(parks)
         staged <- stage_report(html, paste0("multipark_report_", length(parks), "parks"))
         removeNotification(notif_id)
         show_report_preview(staged,
-          title = paste0("Report Preview: ", length(parks), "-Park Comparison"),
-          subtitle = paste0(length(site_ids),
-                            " water supplies across ", length(parks),
-                            " park units, all ranked on the same national scale."))
-
+                            title = paste0("Report Preview: ", length(parks), "-Park Comparison"),
+                            subtitle = paste0(length(site_ids),
+                                              " water supplies across ", length(parks),
+                                              " park units, all ranked on the same national scale."))
+        
       } else {
         html <- build_batch_report_html(
           site_ids, scope_label = paste(sort(parks), collapse = ", "))
         staged <- stage_report(html, paste0("batch_report_", length(site_ids), "supplies"))
         removeNotification(notif_id)
         show_report_preview(staged,
-          title = paste0("Report Preview: Batch (", length(site_ids), " supplies)"),
-          subtitle = "One complete single-site report per supply, page-broken for printing.")
+                            title = paste0("Report Preview: Batch (", length(site_ids), " supplies)"),
+                            subtitle = "One complete single-site report per supply, page-broken for printing.")
       }
     }, error = function(e) {
       removeNotification(notif_id)
@@ -3453,7 +3944,7 @@ server <- function(input, output, session) {
                        type = "error", duration = 10)
     })
   })
-
+  
   ## Feedback: Report a Bug / Request an Update ----
   # Submissions are appended to FEEDBACK_LOG when the filesystem allows it, but
   # that file is ephemeral on shinyapps.io. The confirmation step therefore hands
@@ -3498,7 +3989,7 @@ server <- function(input, output, session) {
       )
     ))
   })
-
+  
   observeEvent(input$feedback_btn, {
     showModal(modalDialog(
       title = tagList(icon("bug", style = "color:#8B4A2B; margin-right:6px;"),
@@ -3540,7 +4031,7 @@ server <- function(input, output, session) {
       )
     ))
   })
-
+  
   observeEvent(input$feedback_submit, {
     txt <- trimws(if (is.null(input$feedback_text)) "" else input$feedback_text)
     if (nchar(txt) < 10) {
@@ -3548,7 +4039,7 @@ server <- function(input, output, session) {
                        type = "warning", duration = 5)
       return(invisible(NULL))
     }
-
+    
     ctx <- paste0(
       "Region: ",  if (length(input$filter_region) > 0) paste(input$filter_region, collapse = "; ") else "All",
       " | State: ", if (length(input$filter_state) > 0) paste(input$filter_state, collapse = "; ") else "All",
@@ -3560,7 +4051,7 @@ server <- function(input, output, session) {
       " | Selected supply: ", if (is.null(clicked_site())) "none" else clicked_site(),
       " | App version: ", APP_VERSION
     )
-
+    
     entry <- data.frame(
       timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S", tz = "UTC"),
       type      = input$feedback_type,
@@ -3570,7 +4061,7 @@ server <- function(input, output, session) {
       message   = txt,
       stringsAsFactors = FALSE
     )
-
+    
     logged <- tryCatch({
       dir.create(dirname(FEEDBACK_LOG), showWarnings = FALSE, recursive = TRUE)
       readr::write_csv(entry, FEEDBACK_LOG,
@@ -3578,7 +4069,7 @@ server <- function(input, output, session) {
                        col_names = !file.exists(FEEDBACK_LOG))
       TRUE
     }, error = function(e) FALSE)
-
+    
     subject <- paste0("[NPS WSVA Tool] ", toupper(input$feedback_type), " - ", input$feedback_area)
     body    <- paste0(txt, "\n\n---\nContext: ", ctx,
                       "\nSubmitted: ", entry$timestamp, " UTC",
@@ -3587,7 +4078,7 @@ server <- function(input, output, session) {
     mailto  <- paste0("mailto:", FEEDBACK_EMAIL,
                       "?subject=", utils::URLencode(subject, reserved = TRUE),
                       "&body=",    utils::URLencode(body, reserved = TRUE))
-
+    
     removeModal()
     showModal(modalDialog(
       title = tagList(icon("circle-check", style = "color:#386150; margin-right:6px;"),
@@ -3621,7 +4112,7 @@ server <- function(input, output, session) {
       footer = modalButton("Close")
     ))
   })
-
+  
   
   # # ── Clicked site reactive ───────────────────────────────────────────────
   # clicked_site <- reactiveVal(NULL)
@@ -3794,6 +4285,7 @@ server <- function(input, output, session) {
                                           title.position = "top", title.hjust = 0.5)
         ) +
         ggplot2::scale_size_continuous(range = c(1, 4), guide = "none") +
+        map_decorations(xlim_use, ylim_use, deco_scale = 1.15) +
         ggplot2::coord_sf(xlim = xlim_use, ylim = ylim_use, expand = FALSE) +
         ggplot2::labs(
           title    = map_title,
@@ -3802,13 +4294,17 @@ server <- function(input, output, session) {
             if (filter_str != "None (national)") paste0("\nFilters: ", filter_str) else "",
             "\nData: ", DATA_LAST_UPDATED, "  |  Exported: ", format(Sys.Date(), "%B %d, %Y")
           ),
-          caption  = "NPS Water Supply Vulnerability Assessment Tool | Colorado State University Geospatial Centroid"
+          caption  = paste0(
+            "NPS Water Supply Vulnerability Assessment Tool\n",
+            "Generated from ", APP_URL_DISPLAY, " on ", format(Sys.Date(), "%B %d, %Y"), "\n",
+            "Colorado State University Geospatial Centroid")
         ) +
         ggplot2::theme_minimal(base_size = 11) +
         ggplot2::theme(
           plot.title       = ggplot2::element_text(color = comp_color, face = "bold", size = 14),
           plot.subtitle    = ggplot2::element_text(color = "#555", size = 8.5, lineheight = 1.3),
-          plot.caption     = ggplot2::element_text(color = "#888", size = 8, hjust = 0.5),
+          plot.caption     = ggplot2::element_text(color = "#888", size = 8, hjust = 0.5,
+                                                   lineheight = 1.25),
           legend.title     = ggplot2::element_text(size = 9, face = "bold"),
           legend.text      = ggplot2::element_text(size = 8),
           legend.position  = "right",
