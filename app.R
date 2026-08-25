@@ -338,7 +338,7 @@ indicator_config <- list(
         description = "Projected change in the area under the curve where monthly visitation share exceeds monthly water supply share. A larger increase means demand is shifting further out of alignment with available water."
       )
     ),
-    "Sea Level Rise" = list(
+    "Coastal" = list(
       "Inundation from Sea Level Rise" = list(
         col = "norm_exp_inundation_slr", raw_col = "exp_inundation_slr",
         status = "Implemented",
@@ -427,7 +427,7 @@ indicator_config <- list(
         description = "% of surrounding area in a high-risk FEMA flood zone"
       )
     ),
-    "Sea Level Rise" = list(
+    "Coastal" = list(
       "Current Inundation" = list(
         col = "norm_sen_inundation_current", raw_col = "sen_inundation_current",
         status = "Implemented",
@@ -674,7 +674,7 @@ score_rank_cols <- list(
 factor_labels <- c(
   "factor_exp_water_supply" = "Water Supply\n(Exp)",
   "factor_exp_drought"      = "Drought\n(Exp)",
-  "factor_exp_slr"          = "Sea Level Rise\n(Exp)",
+  "factor_exp_slr"          = "Coastal\n(Exp)",
   "factor_exp_wildfire"     = "Wildfire\n(Exp)",
   "factor_exp_demand"       = "Demand\n(Exp)",
   "factor_exp_temp"         = "Temperature\n(Exp)",
@@ -682,7 +682,7 @@ factor_labels <- c(
   "factor_sen_infrastructure" = "Supply\n(Sen)",
   "factor_sen_wildfire"     = "Wildfire\n(Sen)",
   "factor_sen_flood"        = "Flood\n(Sen)",
-  "factor_sen_slr"          = "Sea Level Rise\n(Sen)",
+  "factor_sen_slr"          = "Coastal\n(Sen)",
   "factor_sen_water_supply" = "Water Supply\n(Sen)",
   "factor_sen_drought"      = "Drought\n(Sen)",
   "factor_sen_temp"         = "Temperature\n(Sen)"
@@ -737,7 +737,7 @@ report_factor_defs <- list(
          list(norm_col = "norm_exp_nearby_use_change", label = "Nearby Water Use"),
          list(norm_col = "norm_exp_auc_change",        label = "Supply-Demand Mismatch")
        )),
-  list(id = "factor_exp_slr", comp = "Exposure", label = "Sea Level Rise", type = "euclidean",
+  list(id = "factor_exp_slr", comp = "Exposure", label = "Coastal", type = "euclidean",
        indicators = list(
          list(norm_col = "norm_exp_inundation_slr", label = "Inundation"),
          list(norm_col = "norm_exp_swi",            label = "Saltwater Intrusion"),
@@ -754,7 +754,7 @@ report_factor_defs <- list(
   list(id = "factor_sen_infrastructure", comp = "Sensitivity", label = "Source Type", type = "single"),
   list(id = "factor_sen_wildfire", comp = "Sensitivity", label = "Wildfire", type = "single"),
   list(id = "factor_sen_flood", comp = "Sensitivity", label = "Flood", type = "single"),
-  list(id = "factor_sen_slr", comp = "Sensitivity", label = "Sea Level Rise", type = "single"),
+  list(id = "factor_sen_slr", comp = "Sensitivity", label = "Coastal", type = "single"),
   # Report S5.7. Single-indicator factor, but which indicator depends on source
   # type, so it carries the same indicators_by_var map as its Exposure twin --
   # used for labelling rather than for drilling down, since a single-indicator
@@ -1406,13 +1406,13 @@ rpt_extract_ranks <- function(scored_df, sid) {
 
 rpt_flag_badges <- function(row) {
   flags <- c(
-    if (isTRUE(row$flag_fire[1]))    "\U0001F525 Fire"           else NULL,
-    if (isTRUE(row$flag_flood[1]))   "\U0001F4A7 Flood"          else NULL,
-    if (isTRUE(row$flag_slr[1]))     "\U0001F30A Sea Level Rise" else NULL,
-    if (isTRUE(row$flag_drought[1])) "\u2600\uFE0F Drought"      else NULL
+    if (isTRUE(row$flag_fire[1]))    "\U0001F525 Fire"      else NULL,
+    if (isTRUE(row$flag_flood[1]))   "\U0001F4A7 Flood"     else NULL,
+    if (isTRUE(row$flag_slr[1]))     "\U0001F30A Coastal"   else NULL,
+    if (isTRUE(row$flag_drought[1])) "\u2600\uFE0F Drought" else NULL
   )
   cols <- c("\U0001F525 Fire" = "#C05235", "\U0001F4A7 Flood" = "#457B9D",
-            "\U0001F30A Sea Level Rise" = "#1D3557", "\u2600\uFE0F Drought" = "#8B6914")
+            "\U0001F30A Coastal" = "#1D3557", "\u2600\uFE0F Drought" = "#8B6914")
   if (length(flags) == 0) return("")
   badges <- sapply(flags, function(f) {
     col <- if (f %in% names(cols)) cols[[f]] else "#666"
@@ -1425,7 +1425,7 @@ rpt_flag_badges <- function(row) {
 rpt_flag_text <- function(row) {
   f <- c(if (isTRUE(row$flag_fire[1]))    "Fire"    else NULL,
          if (isTRUE(row$flag_flood[1]))   "Flood"   else NULL,
-         if (isTRUE(row$flag_slr[1]))     "SLR"     else NULL,
+         if (isTRUE(row$flag_slr[1]))     "Coastal" else NULL,
          if (isTRUE(row$flag_drought[1])) "Drought" else NULL)
   if (length(f) == 0) "\u2014" else paste(f, collapse = ", ")
 }
@@ -1735,7 +1735,7 @@ build_park_report_html <- function(park_unit_code) {
   flag_counts <- c(
     Fire    = sum(!is.na(sub$flag_fire)    & sub$flag_fire),
     Flood   = sum(!is.na(sub$flag_flood)   & sub$flag_flood),
-    SLR     = sum(!is.na(sub$flag_slr)     & sub$flag_slr),
+    Coastal = sum(!is.na(sub$flag_slr)     & sub$flag_slr),
     Drought = sum(!is.na(sub$flag_drought) & sub$flag_drought)
   )
   
@@ -2492,20 +2492,19 @@ ui <- navbarPage(
                                     ),
                                     tags$hr(style = "border-color:#dce8ef; margin:8px 0;"),
                                     p(style = "font-size:1.2rem; color:#555; margin-bottom:6px;",
-                                      HTML("<b>Percentile ranks</b> and <b>High Priority</b> flags (shown in popups and the data table)
+                                      HTML("<b>Percentile ranks</b> (shown in popups and the data table)
             indicate where a water supply falls relative to others in its <b>comparison group</b> &mdash;
             a rank of <b>90</b> means the supply scores higher than 90% of that group.
             <b>Only the Region and State filters change the comparison group.</b> Applying either one
-            renormalizes and reranks every supply in the selection, so a supply flagged as High Priority
-            within a state may not hold that designation nationally.")),
+            renormalizes and reranks every supply in the selection.")),
                                     p(style = "font-size:1.2rem; color:#555; margin-bottom:6px;",
                                       HTML("The <b>Park Unit</b>, <b>Source Type</b>, <b>Hazard Flag</b> and
-            <b>Top Priority</b> filters work differently: they subset what is drawn on the map and listed
+            <b>Top Priority</b> filters subset what is drawn on the map and listed
             in the table, but they do <b>not</b> trigger a recalculation. Filtering to a single park shows you
             that park&rsquo;s supplies carrying their <i>national</i> (or Region/State) ranks &mdash; not
             ranks against the other supplies in that park. The <b>Scores:</b> badge in the Current View
-            panel always names the group the numbers on screen were actually calculated against.
-            If you want true within-park rankings, build a <b>whole-park report</b> from the Advanced
+            panel always names the group the numbers on screen were calculated against.
+            If you want within-park rankings, build a <b>whole-park report</b> from the Advanced
             Reports panel below the map; it reports both, side by side and labelled.")),
                                     div(style = "background:#fff8e6; border-left:3px solid #8B6914; border-radius:4px; padding:8px 12px; margin-top:6px;",
                                         p(style = "font-size:1.4rem; color:#5a4a1a; margin:0;",
@@ -2521,15 +2520,15 @@ ui <- navbarPage(
           <span class='badge-demo' style='background:#9B2226;'>HIGH PRIORITY</span>.
           This threshold is recalculated relative to the Region/State comparison group
           (CONUS, region, or state subset), so priority designations reflect that group rather than a
-          fixed national threshold. Filtering by park, source type or hazard flag does not move the threshold.
-          Popups also display hazard-specific flags, which use the <strong>same top-25% rule applied to the
+          fixed national threshold.
+          Hazard-specific flags use the <strong>same top-25% rule applied to the
           individual factor score</strong> rather than to the overall vulnerability score:
           <span class='badge-demo' style='background:#C05235;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>
           <span class='badge-demo' style='background:#457B9D;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>
-          <span class='badge-demo' style='background:#1D3557;'><span aria-hidden='true'>&#x1F30A;</span> Sea Level Rise</span>
+          <span class='badge-demo' style='background:#1D3557;'><span aria-hidden='true'>&#x1F30A;</span> Coastal</span>
           <span class='badge-demo' style='background:#8B6914;'><span aria-hidden='true'>&#x2600;&#xFE0F;</span> Drought</span>
           A supply is flagged for a hazard when its Exposure <em>or</em> Sensitivity factor for that hazard is in the
-          top quartile. Factors with limited spatial coverage (flood, sea level rise) are ranked only against the
+          top quartile. Factors with limited spatial coverage (flood, coastal) are ranked only against the
           supplies that have a value, so a flag means &ldquo;high relative to the supplies that were assessed for
           this hazard&rdquo;, not high relative to all supplies nationally."))
                             )
@@ -2691,7 +2690,7 @@ ui <- navbarPage(
                                                 label = tags$span("Hazard Flags", style = "color:#1D3557; font-weight:600; font-size:1.2rem;"),
                                                 choices = c("Fire" = "flag_fire",
                                                             "Flood" = "flag_flood",
-                                                            "Sea Level Rise" = "flag_slr",
+                                                            "Coastal" = "flag_slr",
                                                             "Drought" = "flag_drought"),
                                                 selected = NULL,
                                                 multiple = TRUE,
@@ -3652,10 +3651,10 @@ server <- function(input, output, session) {
     
     radius_vec <- if (is_inverted) {
       ifelse(is.na(plot_vals), 3,
-             pmax(3, pmin(12, scales::rescale(plot_vals, to=c(12,3), from=pal_dom))))
+             pmax(4, pmin(12, scales::rescale(plot_vals, to=c(12,4), from=pal_dom))))
     } else {
       ifelse(is.na(plot_vals), 3,
-             pmax(3, pmin(12, scales::rescale(plot_vals, to=c(3,12), from=pal_dom))))
+             pmax(4, pmin(12, scales::rescale(plot_vals, to=c(4,12), from=pal_dom))))
     }
     fill_vec   <- pal(plot_vals)
     
@@ -4941,7 +4940,7 @@ server <- function(input, output, session) {
         if (length(input$filter_flags) > 0) paste0(
           "Hazard Flags (",
           if (identical(input$filter_flags_mode, "all")) "all of" else "any of", "): ",
-          paste(c(flag_fire = "Fire", flag_flood = "Flood", flag_slr = "Sea Level Rise",
+          paste(c(flag_fire = "Fire", flag_flood = "Flood", flag_slr = "Coastal",
                   flag_drought = "Drought")[input$filter_flags], collapse=", ")),
         if (isTRUE(input$filter_priority)) "Priority: High Priority Only"
       )
@@ -5108,7 +5107,7 @@ server <- function(input, output, session) {
           ifelse(!is.na(priority_group) & priority_group, "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'>HIGH PRIORITY</span>", ""),
           ifelse(!is.na(flag_fire)    & flag_fire,    "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>", ""),
           ifelse(!is.na(flag_flood)   & flag_flood,   "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>", ""),
-          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F30A;</span> Sea Level Rise</span>", ""),
+          ifelse(!is.na(flag_slr)     & flag_slr,     "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x1F30A;</span> Coastal</span>", ""),
           ifelse(!is.na(flag_drought) & flag_drought,  "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;margin-right:2px;'><span aria-hidden='true'>&#x2600;&#xFE0F;</span> Drought</span>", "")
         )
       ) %>%
@@ -5543,7 +5542,7 @@ server <- function(input, output, session) {
       if (isTRUE(priority))    "<span style='background:#9B2226;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'>HIGH PRIORITY</span>" else NULL,
       if (isTRUE(flag_fire))   "<span style='background:#C05235;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F525;</span> Fire</span>"   else NULL,
       if (isTRUE(flag_flood))  "<span style='background:#457B9D;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F4A7;</span> Flood</span>"  else NULL,
-      if (isTRUE(flag_slr))    "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F30A;</span> Sea Level Rise</span>"    else NULL,
+      if (isTRUE(flag_slr))    "<span style='background:#1D3557;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x1F30A;</span> Coastal</span>" else NULL,
       if (isTRUE(flag_drought)) "<span style='background:#8B6914;color:white;padding:1px 5px;border-radius:3px;font-size:10px;'><span aria-hidden='true'>&#x2600;&#xFE0F;</span> Drought</span>" else NULL
     )
     flag_section <- if (length(flags) > 0)
