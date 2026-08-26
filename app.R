@@ -2463,7 +2463,7 @@ ui <- navbarPage(
                             div(style = "margin-top:12px;",
                                 p(HTML("This tool visualizes water supply vulnerability across the National Park System
           using a framework modeled after <a href='https://conbio.onlinelibrary.wiley.com/doi/10.1111/con4.70020' target='_blank' style='color:#457B9D;'>Michalak et al. 2026</a>. Each water supply is scored
-          on two components &mdash; <strong style='color:#457B9D;'>Exposure</strong> (projected climate threats)
+          on two components &mdash; <strong style='color:#457B9D;'>Exposure</strong> (projected threats)
           and <strong style='color:#C05235;'>Sensitivity</strong> (current susceptibility) &mdash;
           which combine into an overall <strong style='color:#386150;'>Relative Vulnerability Score</strong>.
           Larger, darker circles indicate higher vulnerability.")),
