@@ -5346,7 +5346,7 @@ server <- function(input, output, session) {
     zm  <- isolate(input$wbm_map_zoom)
     
     m <- leaflet(options = leafletOptions(preferCanvas = TRUE)) %>%
-      addProviderTiles(providers$CartoDB.Positron, group = "Light") %>%
+      addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Light") %>%
       addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>%
       addProviderTiles(providers$Esri.WorldTopoMap, group = "Terrain") %>%
       addLayersControl(baseGroups = c("Light", "Satellite", "Terrain"),
