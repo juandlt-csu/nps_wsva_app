@@ -11,4 +11,4 @@
 
 library(shinytest2)
 
-test_app()
+test_app("rapid_app")
