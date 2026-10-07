@@ -6,3 +6,5 @@
 **/.DS_Store
 rsconnect/
 tests/testthat/_snaps/**/*.new.*
+data
+private_docs/

@@ -2,16 +2,19 @@
 #
 # These launch the full app (app.R sources calc_vulnerability_index.R and reads
 # everything in app_data/), so they are slower and need shinytest2 + Chrome on
-# the machine. The whole file is skipped where either is missing, or on CRAN.
+# the machine. The whole file is skipped where either is missing.
 
 testthat::skip_if_not_installed("shinytest2")
 testthat::skip_if_not_installed("chromote")
 library(shinytest2)
 
+# AppDriver$new() skips itself unless NOT_CRAN is "true". This app is never
+# checked on CRAN, so run wherever Chrome is available.
+withr::local_envvar(NOT_CRAN = "true")
+
 app_dir <- testthat::test_path("..", "..")
 
 skip_if_no_chrome <- function() {
-  skip_on_cran()
   chrome <- tryCatch(chromote::find_chrome(), error = function(e) "")
   if (is.null(chrome) || !nzchar(chrome)) skip("Chrome/Chromium not available")
 }
@@ -22,6 +25,23 @@ table_total <- function(app) {
   hit <- regmatches(txt, regexec("of ([0-9,]+) entries", txt))[[1]]
   if (length(hit) < 2) return(NA_integer_)
   as.integer(gsub(",", "", hit[2]))
+}
+
+# Any filter change re-fits the map to the new extent (see app.R's "Zoom to
+# Filtered Extent" observer), and the table re-renders against
+# map_bounds_debounced() -- a 400ms debounce on the resulting viewport change.
+# The table therefore re-renders TWICE per filter change: once immediately
+# against the still-stale bounds, then again once the debounce fires. The
+# server is genuinely idle in between, so wait_for_idle() can return before
+# the second render and read the stale count. Poll instead of trusting one
+# idle check.
+wait_until <- function(condition, timeout = 10, interval = 0.25) {
+  deadline <- Sys.time() + timeout
+  repeat {
+    if (isTRUE(condition())) return(invisible(TRUE))
+    if (Sys.time() > deadline) return(invisible(FALSE))
+    Sys.sleep(interval)
+  }
 }
 
 
@@ -81,9 +101,14 @@ test_that("a region filter narrows the table and Clear All Filters restores it",
 
   app$set_inputs(filter_region = busiest_region)
   app$wait_for_idle(timeout = 60 * 1000)
+  wait_until(function() {
+    total <- table_total(app)
+    !is.na(total) && total < baseline
+  })
   expect_lt(table_total(app), baseline)
 
   app$click("clear_filters")
   app$wait_for_idle(timeout = 60 * 1000)
+  wait_until(function() identical(table_total(app), baseline))
   expect_equal(table_total(app), baseline)
 })
